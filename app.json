@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "Quran Folio",
+    "slug": "quran-folio",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "scheme": "quranfolio",
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "expo-document-picker",
+      "expo-font",
+      "expo-localization",
+      "expo-status-bar"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.quranfolio.app"
+    },
+    "android": {
+      "package": "com.quranfolio.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#163F36"
+      }
+    }
+  }
+}

@@ -1,0 +1,99 @@
+import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useState } from 'react';
+
+import { FolioButton } from '@/components/FolioButton';
+import { colors, fontFamilies, spacing } from '@/theme/tokens';
+import type { HighlightColor, ReaderAyah } from '@/types/domain';
+
+const highlightColors: HighlightColor[] = ['amber', 'sage', 'sky', 'rose'];
+
+interface AnnotationEditorProps {
+  ayah: ReaderAyah | null;
+  visible: boolean;
+  saving: boolean;
+  onClose: () => void;
+  onSave: (note: string | null, highlight: HighlightColor | null) => void;
+}
+
+export function AnnotationEditor({ ayah, visible, saving, onClose, onSave }: AnnotationEditorProps) {
+  const [note, setNote] = useState(() => ayah?.annotation?.noteText ?? '');
+  const [highlight, setHighlight] = useState<HighlightColor | null>(() => ayah?.annotation?.highlightColor ?? null);
+
+  if (!ayah) return null;
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet" visible={visible}>
+      <View style={styles.container}>
+        <View style={styles.topRule} />
+        <Text style={styles.eyebrow}>REFLECTION · {ayah.verseKey}</Text>
+        <Text numberOfLines={2} style={styles.arabic}>{ayah.textUthmani}</Text>
+        <Text style={styles.label}>NOTE</Text>
+        <TextInput
+          accessibilityLabel={`Note for verse ${ayah.verseKey}`}
+          maxLength={10_000}
+          multiline
+          onChangeText={setNote}
+          placeholder="Write a private reflection…"
+          placeholderTextColor={colors.inkMuted}
+          style={styles.input}
+          textAlignVertical="top"
+          value={note}
+        />
+        <Text style={styles.label}>WHOLE-AYAH HIGHLIGHT</Text>
+        <View style={styles.swatches}>
+          {highlightColors.map((color) => (
+            <Pressable
+              accessibilityLabel={`${color} highlight`}
+              accessibilityRole="button"
+              key={color}
+              onPress={() => setHighlight((current) => current === color ? null : color)}
+              style={[
+                styles.swatch,
+                { backgroundColor: colors.highlight[color] },
+                highlight === color ? styles.swatchSelected : null,
+              ]}
+            />
+          ))}
+          <Pressable onPress={() => setHighlight(null)} style={styles.clearHighlight}>
+            <Text style={styles.clearLabel}>CLEAR</Text>
+          </Pressable>
+        </View>
+        <View style={styles.actions}>
+          <FolioButton label="Cancel" onPress={onClose} style={styles.action} variant="quiet" />
+          <FolioButton
+            label={note.trim() || highlight ? 'Save reflection' : 'Clear reflection'}
+            loading={saving}
+            onPress={() => onSave(note.trim() || null, highlight)}
+            style={styles.action}
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { backgroundColor: colors.paper, flex: 1, padding: spacing.lg, paddingTop: 58 },
+  topRule: { backgroundColor: colors.gold, height: 2, marginBottom: 14, width: 46 },
+  eyebrow: { color: colors.gold, fontFamily: fontFamilies.bodyBold, fontSize: 12, letterSpacing: 1.8 },
+  arabic: { color: colors.emerald, fontFamily: fontFamilies.arabic, fontSize: 26, lineHeight: 44, marginVertical: 16, textAlign: 'right', writingDirection: 'rtl' },
+  label: { color: colors.inkMuted, fontFamily: fontFamilies.bodyBold, fontSize: 11, letterSpacing: 1.5, marginBottom: 8, marginTop: 16 },
+  input: {
+    backgroundColor: colors.paperLight,
+    borderColor: colors.border,
+    borderRadius: 3,
+    borderWidth: 1,
+    color: colors.ink,
+    fontFamily: fontFamilies.body,
+    fontSize: 19,
+    lineHeight: 26,
+    minHeight: 180,
+    padding: 16,
+  },
+  swatches: { alignItems: 'center', flexDirection: 'row', gap: 14 },
+  swatch: { borderColor: colors.paperLight, borderRadius: 22, borderWidth: 4, height: 44, width: 44 },
+  swatchSelected: { borderColor: colors.emerald, transform: [{ scale: 1.08 }] },
+  clearHighlight: { padding: 8 },
+  clearLabel: { color: colors.oxblood, fontFamily: fontFamilies.bodyBold, fontSize: 12, letterSpacing: 1 },
+  actions: { flexDirection: 'row', gap: 12, marginTop: 'auto', paddingBottom: 20 },
+  action: { flex: 1 },
+});

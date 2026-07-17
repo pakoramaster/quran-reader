@@ -1,0 +1,12 @@
+appId: com.quranfolio.app
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Quran Folio"
+- assertVisible: "No translation imported yet"
+- tapOn: "Library"
+- assertVisible: "Translations"
+- assertVisible: "Choose a JSON file"
+# File selection is platform-owned and should use a prepared complete fixture in
+# device-specific CI. After import, continue with reader, annotation, app restart,
+# and airplane-mode assertions.
