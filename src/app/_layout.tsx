@@ -11,6 +11,7 @@ import { SQLiteProvider } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { LoadingFolio } from '@/components/LoadingFolio';
 import { UserDatabaseProvider } from '@/data/databases/UserDatabaseProvider';
@@ -39,30 +40,32 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <QueryClientProvider client={queryClient}>
-        <SQLiteProvider
-          databaseName="quran-uthmani-v1.1.sqlite"
-          // Metro requires a static CommonJS asset reference for bundled SQLite files.
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          assetSource={{ assetId: require('../../assets/data/quran.sqlite') }}
-          onInit={initializeQuranDatabase}
-        >
-          <UserDatabaseProvider>
-            <ImportSessionProvider>
-              <SpeechProvider>
-                <StatusBar style="dark" />
-                <Stack screenOptions={{ contentStyle: { backgroundColor: colors.paper }, headerShown: false }}>
-                  <Stack.Screen name="(tabs)" />
-                  <Stack.Screen name="surah/[surahNumber]" />
-                  <Stack.Screen name="translations/import" options={{ presentation: 'modal' }} />
-                  <Stack.Screen name="translations/import-preview" options={{ presentation: 'modal' }} />
-                  <Stack.Screen name="translations/[translationId]" />
-                </Stack>
-              </SpeechProvider>
-            </ImportSessionProvider>
-          </UserDatabaseProvider>
-        </SQLiteProvider>
-      </QueryClientProvider>
+      <SafeAreaProvider>
+        <QueryClientProvider client={queryClient}>
+          <SQLiteProvider
+            databaseName="quran-uthmani-v1.1.sqlite"
+            // Metro requires a static CommonJS asset reference for bundled SQLite files.
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            assetSource={{ assetId: require('../../assets/data/quran.sqlite') }}
+            onInit={initializeQuranDatabase}
+          >
+            <UserDatabaseProvider>
+              <ImportSessionProvider>
+                <SpeechProvider>
+                  <StatusBar style="dark" />
+                  <Stack screenOptions={{ contentStyle: { backgroundColor: colors.paper }, headerShown: false }}>
+                    <Stack.Screen name="(tabs)" />
+                    <Stack.Screen name="surah/[surahNumber]" />
+                    <Stack.Screen name="translations/import" options={{ presentation: 'modal' }} />
+                    <Stack.Screen name="translations/import-preview" options={{ presentation: 'modal' }} />
+                    <Stack.Screen name="translations/[translationId]" />
+                  </Stack>
+                </SpeechProvider>
+              </ImportSessionProvider>
+            </UserDatabaseProvider>
+          </SQLiteProvider>
+        </QueryClientProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

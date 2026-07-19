@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EmptyFolio } from '@/components/EmptyFolio';
 import { LoadingFolio } from '@/components/LoadingFolio';
@@ -116,7 +117,7 @@ export default function SurahReaderScreen() {
   const isReading = speech.status === 'speaking';
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.safeArea}>
       <View style={styles.header}>
         <Pressable accessibilityLabel="Back" onPress={() => router.back()} style={styles.headerButton}>
           <Ionicons color={colors.paperLight} name="arrow-back" size={22} />

@@ -1,5 +1,6 @@
 import type { PropsWithChildren, ReactNode } from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { ScrollView, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { colors, fontFamilies, spacing } from '@/theme/tokens';
 
@@ -36,7 +37,7 @@ export function FolioScreen({
   ) : null;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
       <View pointerEvents="none" style={styles.watermark}>
         <View style={styles.watermarkRing} />
         <View style={[styles.watermarkRing, styles.watermarkRingInner]} />
