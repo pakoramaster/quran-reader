@@ -40,3 +40,17 @@ once.
 - Re-importing the same `id` shows a changed-verse count and requires explicit
   confirmation. Replacement is transactional, while notes and highlights remain
   attached to the stable translation ID and verse key.
+
+## faisalill/quran_db compatibility
+
+The importer also recognizes individual JSON files from
+[`faisalill/quran_db`](https://github.com/faisalill/quran_db). Its nested
+Surah/Ayah records are converted locally to canonical `surah:ayah` keys. The
+translator field becomes the display title, and the source filename produces a
+stable `quran-db-*` ID. Partial translations are supported and show their actual
+coverage before installation.
+
+The upstream repository does not declare a license for its translation texts.
+Quran Folio therefore labels these imports as “Licence not specified by source;
+imported by user” and does not bundle or download the corpus. Users are
+responsible for importing only texts they are authorized to use.

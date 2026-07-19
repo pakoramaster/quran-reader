@@ -32,7 +32,7 @@ export default function TranslationsScreen() {
 
   return (
     <FolioScreen
-      action={<FolioButton label="Import JSON" onPress={() => router.push('/translations/import')} />}
+      action={<FolioButton label="Import translation" onPress={() => router.push('/translations/import')} />}
       eyebrow="Your reference shelf"
       subtitle="Each translation is kept exactly as imported. Re-importing the same ID replaces its text while preserving your annotations."
       title="Translations"

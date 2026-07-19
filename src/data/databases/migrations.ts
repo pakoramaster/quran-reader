@@ -1,6 +1,8 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-const VERSION = 1;
+import { normalizeTranslationText } from '@/features/translations/domain/translationText';
+
+const VERSION = 2;
 
 export async function migrateUserDatabase(db: SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
@@ -61,6 +63,27 @@ export async function migrateUserDatabase(db: SQLiteDatabase): Promise<void> {
           ON annotations(updated_at DESC);
         PRAGMA user_version = 1;
       `);
+    }
+    if (currentVersion < 2) {
+      const rows = await db.getAllAsync<{
+        translation_id: string;
+        verse_key: string;
+        original_text: string;
+      }>("SELECT translation_id, verse_key, original_text FROM translation_verses WHERE original_text LIKE '%&%'");
+      const update = await db.prepareAsync(
+        'UPDATE translation_verses SET original_text = ? WHERE translation_id = ? AND verse_key = ?',
+      );
+      try {
+        for (const row of rows) {
+          const normalized = normalizeTranslationText(row.original_text);
+          if (normalized !== row.original_text) {
+            await update.executeAsync(normalized, row.translation_id, row.verse_key);
+          }
+        }
+      } finally {
+        await update.finalizeAsync();
+      }
+      await db.execAsync('PRAGMA user_version = 2;');
     }
   });
 }

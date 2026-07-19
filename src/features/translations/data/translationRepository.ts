@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import type { InstalledTranslation, TranslationManifest, TranslationVerse } from '@/types/domain';
+import { normalizeTranslationText } from '../domain/translationText';
 
 interface TranslationRow {
   id: string;
@@ -69,7 +70,7 @@ export async function listTranslationVerses(
     translationId,
     surahNumber,
   );
-  return rows.map((row) => ({ key: row.verse_key, text: row.original_text }));
+  return rows.map((row) => ({ key: row.verse_key, text: normalizeTranslationText(row.original_text) }));
 }
 
 export async function getActiveTranslationId(db: SQLiteDatabase): Promise<string | null> {

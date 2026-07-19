@@ -27,6 +27,7 @@ interface SpeechContextValue extends SpeechState {
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   stop: () => Promise<void>;
+  reset: () => Promise<void>;
 }
 
 interface QueueConfig {
@@ -49,7 +50,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
   const playAt = useCallback((index: number, session: number) => {
     const queue = queueRef.current;
     if (!queue || session !== sessionRef.current || index >= queue.verses.length) {
-      setState(initialState);
+      setState((current) => ({ status: 'idle', currentVerseKey: current.currentVerseKey, error: null }));
       return;
     }
     const verse = queue.verses[index];
@@ -115,6 +116,14 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     sessionRef.current += 1;
     queueRef.current = null;
     await Speech.stop();
+    setState((current) => ({ status: 'idle', currentVerseKey: current.currentVerseKey, error: null }));
+  }, []);
+
+  const reset = useCallback(async () => {
+    sessionRef.current += 1;
+    queueRef.current = null;
+    indexRef.current = 0;
+    await Speech.stop();
     setState(initialState);
   }, []);
 
@@ -143,8 +152,8 @@ export function SpeechProvider({ children }: PropsWithChildren) {
   useEffect(() => () => void Speech.stop(), []);
 
   const value = useMemo(
-    () => ({ ...state, speakAyah, speakSurah, pause, resume, stop }),
-    [pause, resume, speakAyah, speakSurah, state, stop],
+    () => ({ ...state, speakAyah, speakSurah, pause, resume, stop, reset }),
+    [pause, reset, resume, speakAyah, speakSurah, state, stop],
   );
   return <SpeechContext.Provider value={value}>{children}</SpeechContext.Provider>;
 }

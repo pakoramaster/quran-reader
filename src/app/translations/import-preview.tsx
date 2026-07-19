@@ -44,16 +44,29 @@ export default function ImportPreviewScreen() {
   }
 
   const replacement = session.changedVerseCount !== null;
+  const verseCount = session.manifest.verses.length;
+  const coverage = Math.round((verseCount / 6236) * 100);
+  const installAfterRightsCheck = () => {
+    if (session.sourceFormat !== 'quran-db') {
+      install.mutate();
+      return;
+    }
+    Alert.alert(
+      'Confirm your right to use this text',
+      'The source repository does not specify a licence for this translation. Continue only if you are authorized to use it.',
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'I am authorized', onPress: () => install.mutate() }],
+    );
+  };
   const confirm = () => {
     if (replacement) {
       Alert.alert(
         'Replace this translation?',
         `${session.changedVerseCount?.toLocaleString()} verses differ. The replacement is atomic and your annotations will be retained.`,
-        [{ text: 'Cancel', style: 'cancel' }, { text: 'Replace', style: 'destructive', onPress: () => install.mutate() }],
+        [{ text: 'Cancel', style: 'cancel' }, { text: 'Replace', style: 'destructive', onPress: installAfterRightsCheck }],
       );
       return;
     }
-    install.mutate();
+    installAfterRightsCheck();
   };
 
   return (
@@ -69,15 +82,16 @@ export default function ImportPreviewScreen() {
         <Text style={styles.translator}>Translated by {session.manifest.translator}</Text>
         <View style={styles.rule} />
         <View style={styles.statRow}>
-          <View><Text style={styles.statValue}>6,236</Text><Text style={styles.statLabel}>VERSES</Text></View>
+          <View><Text style={styles.statValue}>{verseCount.toLocaleString()}</Text><Text style={styles.statLabel}>VERSES</Text></View>
           <View><Text style={styles.statValue}>{replacement ? session.changedVerseCount?.toLocaleString() : 'NEW'}</Text><Text style={styles.statLabel}>{replacement ? 'CHANGED' : 'IMPORT'}</Text></View>
-          <View><Text style={styles.statValue}>100%</Text><Text style={styles.statLabel}>COVERAGE</Text></View>
+          <View><Text style={styles.statValue}>{coverage}%</Text><Text style={styles.statLabel}>COVERAGE</Text></View>
         </View>
       </View>
 
       <View style={styles.details}>
         <Detail label="Translation ID" value={session.manifest.id} />
         <Detail label="File" value={session.fileName} />
+        <Detail label="Detected format" value={session.sourceFormat === 'quran-db' ? 'faisalill/quran_db' : 'Quran Folio JSON v1'} />
         <Detail label="Source" value={session.manifest.source.name} />
         <Detail label="License declaration" value={session.manifest.license.name} />
         <Detail label="SHA-256" value={session.checksum} mono />
@@ -86,6 +100,12 @@ export default function ImportPreviewScreen() {
         <View style={styles.notice}>
           <Ionicons color={colors.gold} name="shield-checkmark-outline" size={24} />
           <Text style={styles.noticeText}>The existing translation remains readable if any write fails. Notes and highlights are keyed independently and will be retained.</Text>
+        </View>
+      ) : null}
+      {session.sourceFormat === 'quran-db' ? (
+        <View style={styles.notice}>
+          <Ionicons color={colors.gold} name="document-lock-outline" size={24} />
+          <Text style={styles.noticeText}>The source repository does not declare redistribution rights for this text. Import only if you are authorized to use it.</Text>
         </View>
       ) : null}
       <View style={styles.actions}>

@@ -16,7 +16,7 @@ import { useImportSession } from '@/features/translations/application/ImportSess
 import { countChangedVerses } from '@/features/translations/data/translationRepository';
 import {
   MAX_TRANSLATION_FILE_BYTES,
-  validateTranslationJson,
+  validateTranslationFile,
 } from '@/features/translations/domain/translationFormat';
 import { colors, fontFamilies, spacing } from '@/theme/tokens';
 
@@ -38,7 +38,7 @@ export default function ImportTranslationScreen() {
       const result = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,
         multiple: false,
-        type: ['application/json', 'text/json', 'text/plain'],
+        type: ['application/json', 'text/json'],
       });
       if (result.canceled) return;
       const asset = result.assets[0];
@@ -53,14 +53,20 @@ export default function ImportTranslationScreen() {
         setIssues([{ code: 'schema', message: 'The file is larger than the 10 MB import limit.' }]);
         return;
       }
-      const validation = validateTranslationJson(raw, canonicalKeys.data ?? []);
+      const validation = validateTranslationFile(raw, canonicalKeys.data ?? [], asset.name);
       if (!validation.ok) {
         setIssues(validation.issues);
         return;
       }
       const checksum = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, raw);
       const changedVerseCount = await countChangedVerses(userDb, validation.manifest);
-      setSession({ fileName: asset.name, checksum, manifest: validation.manifest, changedVerseCount });
+      setSession({
+        fileName: asset.name,
+        checksum,
+        manifest: validation.manifest,
+        changedVerseCount,
+        sourceFormat: validation.sourceFormat,
+      });
       router.push('/translations/import-preview');
     } catch (error) {
       setIssues([{ code: 'schema', message: error instanceof Error ? error.message : 'The file could not be read.' }]);
@@ -84,8 +90,8 @@ export default function ImportTranslationScreen() {
         <View style={styles.documentMark}>
           <Ionicons color={colors.gold} name="document-text-outline" size={38} />
         </View>
-        <Text style={styles.dropTitle}>Choose a structured JSON file</Text>
-        <Text style={styles.dropBody}>Maximum 10 MB · UTF-8 · exactly 6,236 canonical verse keys</Text>
+        <Text style={styles.dropTitle}>Choose a translation JSON file</Text>
+        <Text style={styles.dropBody}>Quran Folio manifests and faisalill/quran_db files are recognized automatically.</Text>
         <FolioButton
           disabled={!canonicalKeys.data}
           label="Open document picker"
@@ -109,7 +115,10 @@ export default function ImportTranslationScreen() {
       ) : null}
 
       <View style={styles.specPanel}>
-        <Text style={styles.specEyebrow}>REQUIRED MANIFEST</Text>
+        <Text style={styles.specEyebrow}>SUPPORTED FORMATS</Text>
+        <Text style={styles.specText}>Quran Folio JSON v1 with explicit metadata and complete verse coverage</Text>
+        <Text style={styles.specText}>faisalill/quran_db nested Surah/Ayah JSON</Text>
+        <Text style={styles.specEyebrow}>QURAN FOLIO MANIFEST</Text>
         <Text style={styles.specText}>format · version · id · title · language · translator</Text>
         <Text style={styles.specText}>source name/URL · license name/URL · verses[]</Text>
         <View style={styles.codeLine}>

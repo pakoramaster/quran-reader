@@ -32,6 +32,7 @@ export default function SurahReaderScreen() {
   const speech = useSpeech();
   const listRef = useRef<FlatList<ReaderAyah>>(null);
   const [editorAyah, setEditorAyah] = useState<ReaderAyah | null>(null);
+  const [selectedAyahNumber, setSelectedAyahNumber] = useState<number | null>(null);
 
   const surah = useQuery({
     queryKey: ['surah', surahNumber],
@@ -89,6 +90,11 @@ export default function SurahReaderScreen() {
     return undefined;
   }, [readerAyahs.length, targetAyah]);
 
+  const resetSpeech = speech.reset;
+  useEffect(() => () => {
+    void resetSpeech();
+  }, [resetSpeech]);
+
   const saveMutation = useMutation({
     mutationFn: ({ note, highlight }: { note: string | null; highlight: HighlightColor | null }) =>
       saveAnnotation(userDb, {
@@ -115,6 +121,32 @@ export default function SurahReaderScreen() {
 
   const translationVerses = translatedAyahs.data ?? [];
   const isReading = speech.status === 'speaking';
+  const [speechSurahPart, speechAyahPart] = speech.currentVerseKey?.split(':') ?? [];
+  const speechAyahNumber = Number(speechAyahPart);
+  const speechCursor = Number(speechSurahPart) === surahNumber && Number.isInteger(speechAyahNumber)
+    ? speechAyahNumber
+    : null;
+  const activeSpeechCursor = speech.status === 'speaking' || speech.status === 'paused' ? speechCursor : null;
+  const playbackStartAyah = activeSpeechCursor
+    ?? selectedAyahNumber
+    ?? speechCursor
+    ?? (targetAyah > 0 ? targetAyah : null)
+    ?? 1;
+  const selectAyah = (ayahNumber: number) => {
+    if (speech.status === 'speaking' || speech.status === 'paused') void speech.stop();
+    setSelectedAyahNumber(ayahNumber);
+  };
+  const startSurahPlayback = () => {
+    const startIndex = translationVerses.findIndex((verse) => Number(verse.key.split(':')[1]) >= playbackStartAyah);
+    if (startIndex < 0) return;
+    setSelectedAyahNumber(null);
+    speech.speakSurah(
+      translationVerses.slice(startIndex),
+      activeTranslation.data!.language,
+      speechSettings.data?.voice ?? undefined,
+      speechSettings.data?.rate,
+    );
+  };
 
   return (
     <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.safeArea}>
@@ -134,7 +166,9 @@ export default function SurahReaderScreen() {
           <View style={styles.playbackCopy}>
             <Text style={styles.playbackLabel}>{activeTranslation.data.title}</Text>
             <Text style={styles.playbackState}>
-              {speech.currentVerseKey ? `Reading ${speech.currentVerseKey}` : 'Ready for read aloud'}
+              {speech.status === 'speaking' || speech.status === 'paused'
+                ? `Reading ${speech.currentVerseKey}`
+                : `Start at ${surahNumber}:${playbackStartAyah}`}
             </Text>
           </View>
           {speech.status === 'paused' ? (
@@ -148,12 +182,7 @@ export default function SurahReaderScreen() {
           ) : (
             <Pressable
               accessibilityLabel="Read this Surah aloud"
-              onPress={() => speech.speakSurah(
-                translationVerses,
-                activeTranslation.data!.language,
-                speechSettings.data?.voice ?? undefined,
-                speechSettings.data?.rate,
-              )}
+              onPress={startSurahPlayback}
               style={styles.playButton}
             >
               <Ionicons color={colors.emerald} name="play" size={21} />
@@ -180,13 +209,21 @@ export default function SurahReaderScreen() {
         ref={listRef}
         renderItem={({ item }) => {
           const highlighted = item.annotation?.highlightColor;
-          const speaking = speech.currentVerseKey === item.verseKey;
+          const speaking = (speech.status === 'speaking' || speech.status === 'paused')
+            && speech.currentVerseKey === item.verseKey;
+          const selected = item.ayahNumber === playbackStartAyah;
           return (
-            <View
-              style={[
+            <Pressable
+              accessibilityLabel={`Select verse ${item.verseKey} for playback`}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              onPress={() => selectAyah(item.ayahNumber)}
+              style={({ pressed }) => [
                 styles.ayahCard,
                 highlighted ? { backgroundColor: colors.highlight[highlighted] } : null,
+                selected ? styles.selectedCard : null,
                 speaking ? styles.speakingCard : null,
+                pressed ? styles.ayahCardPressed : null,
               ]}
             >
               <View style={styles.ayahTopline}>
@@ -195,12 +232,15 @@ export default function SurahReaderScreen() {
                   {item.translationText ? (
                     <Pressable
                       accessibilityLabel={`Read verse ${item.verseKey} aloud`}
-                      onPress={() => speech.speakAyah(
-                        { key: item.verseKey, text: item.translationText! },
-                        activeTranslation.data!.language,
-                        speechSettings.data?.voice ?? undefined,
-                        speechSettings.data?.rate,
-                      )}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        speech.speakAyah(
+                          { key: item.verseKey, text: item.translationText! },
+                          activeTranslation.data!.language,
+                          speechSettings.data?.voice ?? undefined,
+                          speechSettings.data?.rate,
+                        );
+                      }}
                       style={styles.iconButton}
                     >
                       <Ionicons color={colors.emerald} name="volume-medium-outline" size={20} />
@@ -209,7 +249,10 @@ export default function SurahReaderScreen() {
                   {activeTranslation.data ? (
                     <Pressable
                       accessibilityLabel={`Annotate verse ${item.verseKey}`}
-                      onPress={() => setEditorAyah(item)}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        setEditorAyah(item);
+                      }}
                       style={styles.iconButton}
                     >
                       <Ionicons
@@ -230,7 +273,7 @@ export default function SurahReaderScreen() {
                   <Text numberOfLines={3} style={styles.noteText}>{item.annotation.noteText}</Text>
                 </View>
               ) : null}
-            </View>
+            </Pressable>
           );
         }}
         showsVerticalScrollIndicator={false}
@@ -264,6 +307,8 @@ const styles = StyleSheet.create({
   importPromptText: { color: colors.ink, flex: 1, fontFamily: fontFamilies.body, fontSize: 16 },
   list: { padding: 16, paddingBottom: 60 },
   ayahCard: { backgroundColor: colors.paperLight, borderColor: colors.border, borderRadius: 3, borderWidth: 1, marginBottom: 14, padding: 18 },
+  ayahCardPressed: { opacity: 0.82 },
+  selectedCard: { borderColor: colors.gold, borderWidth: 2 },
   speakingCard: { borderColor: colors.gold, borderWidth: 2 },
   ayahTopline: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   verseKey: { color: colors.gold, fontFamily: fontFamilies.bodyBold, fontSize: 12, letterSpacing: 1.2 },

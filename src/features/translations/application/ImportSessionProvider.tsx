@@ -8,6 +8,7 @@ export interface ImportSession {
   checksum: string;
   manifest: TranslationManifest;
   changedVerseCount: number | null;
+  sourceFormat: 'quran-folio' | 'quran-db';
 }
 
 interface ImportSessionContextValue {
