@@ -33,6 +33,7 @@ export default function SurahReaderScreen() {
   const listRef = useRef<FlatList<ReaderAyah>>(null);
   const [editorAyah, setEditorAyah] = useState<ReaderAyah | null>(null);
   const [selectedAyahNumber, setSelectedAyahNumber] = useState<number | null>(null);
+  const [spokenAyahNumber, setSpokenAyahNumber] = useState<number | null>(null);
 
   const surah = useQuery({
     queryKey: ['surah', surahNumber],
@@ -128,6 +129,7 @@ export default function SurahReaderScreen() {
     : null;
   const activeSpeechCursor = speech.status === 'speaking' || speech.status === 'paused' ? speechCursor : null;
   const playbackStartAyah = activeSpeechCursor
+    ?? spokenAyahNumber
     ?? selectedAyahNumber
     ?? speechCursor
     ?? (targetAyah > 0 ? targetAyah : null)
@@ -135,6 +137,7 @@ export default function SurahReaderScreen() {
   const selectAyah = (ayahNumber: number) => {
     if (speech.status === 'speaking' || speech.status === 'paused') void speech.stop();
     setSelectedAyahNumber(ayahNumber);
+    setSpokenAyahNumber(null);
   };
   const startSurahPlayback = () => {
     const startIndex = translationVerses.findIndex((verse) => Number(verse.key.split(':')[1]) >= playbackStartAyah);
@@ -234,6 +237,7 @@ export default function SurahReaderScreen() {
                       accessibilityLabel={`Read verse ${item.verseKey} aloud`}
                       onPress={(event) => {
                         event.stopPropagation();
+                        setSpokenAyahNumber(item.ayahNumber);
                         speech.speakAyah(
                           { key: item.verseKey, text: item.translationText! },
                           activeTranslation.data!.language,
