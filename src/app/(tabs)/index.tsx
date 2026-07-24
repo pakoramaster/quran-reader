@@ -121,5 +121,13 @@ const styles = StyleSheet.create({
   rowCopy: { flex: 1 },
   transliterated: { color: colors.ink, fontFamily: fontFamilies.display, fontSize: 22 },
   count: { color: colors.inkMuted, fontFamily: fontFamilies.bodyBold, fontSize: 10, letterSpacing: 1.2 },
-  arabic: { color: colors.emerald, fontFamily: fontFamilies.arabicBold, fontSize: 22, writingDirection: 'rtl' },
+  arabic: {
+    color: colors.emerald,
+    fontFamily: fontFamilies.arabicBold,
+    fontSize: 22,
+    flexShrink: 1,
+    minWidth: 0,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+  },
 });

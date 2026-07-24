@@ -32,11 +32,11 @@ export default function TranslationsScreen() {
 
   return (
     <FolioScreen
-      action={<FolioButton label="Import translation" onPress={() => router.push('/translations/import')} />}
       eyebrow="Your reference shelf"
       subtitle="Each translation is kept exactly as imported. Re-importing the same ID replaces its text while preserving your annotations."
       title="Translations"
     >
+      <FolioButton label="Import translation" onPress={() => router.push('/translations/import')} style={styles.importButton} />
       {translations.isLoading ? <LoadingFolio label="Reading your library…" /> : null}
       {!translations.isLoading && !translations.data?.length ? (
         <EmptyFolio
@@ -107,4 +107,5 @@ const styles = StyleSheet.create({
   action: { minWidth: 120 },
   activeStatement: { alignItems: 'center', flex: 1, flexDirection: 'row', gap: 7 },
   activeStatementText: { color: colors.emerald, fontFamily: fontFamilies.bodyBold, fontSize: 15 },
+  importButton: { marginBottom: 18 },
 });
