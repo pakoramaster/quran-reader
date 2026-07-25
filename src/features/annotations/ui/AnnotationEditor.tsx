@@ -1,7 +1,9 @@
-import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useState } from 'react';
 
 import { FolioButton } from '@/components/FolioButton';
+import { FolioModal } from '@/platform/ui/FolioModal';
+import { FolioTextInput } from '@/platform/ui/FolioTextInput';
 import { colors, fontFamilies, spacing } from '@/theme/tokens';
 import type { HighlightColor, ReaderAyah } from '@/types/domain';
 
@@ -17,18 +19,19 @@ interface AnnotationEditorProps {
 
 export function AnnotationEditor({ ayah, visible, saving, onClose, onSave }: AnnotationEditorProps) {
   const [note, setNote] = useState(() => ayah?.annotation?.noteText ?? '');
-  const [highlight, setHighlight] = useState<HighlightColor | null>(() => ayah?.annotation?.highlightColor ?? null);
+  const [highlight, setHighlight] = useState<HighlightColor | null>(() => ayah?.annotation?.highlightColor ?? 'amber');
 
   if (!ayah) return null;
   return (
-    <Modal animationType="slide" onRequestClose={onClose} presentationStyle="pageSheet" visible={visible}>
+    <FolioModal onRequestClose={onClose} visible={visible}>
       <View style={styles.container}>
         <View style={styles.topRule} />
         <Text style={styles.eyebrow}>REFLECTION · {ayah.verseKey}</Text>
         <Text numberOfLines={2} style={styles.arabic}>{ayah.textUthmani}</Text>
         <Text style={styles.label}>NOTE</Text>
-        <TextInput
+        <FolioTextInput
           accessibilityLabel={`Note for verse ${ayah.verseKey}`}
+          autoFocus
           maxLength={10_000}
           multiline
           onChangeText={setNote}
@@ -67,7 +70,7 @@ export function AnnotationEditor({ ayah, visible, saving, onClose, onSave }: Ann
           />
         </View>
       </View>
-    </Modal>
+    </FolioModal>
   );
 }
 

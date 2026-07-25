@@ -1,5 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import { runAtomicWrite } from '@/platform/database/runAtomicWrite';
 import type { InstalledTranslation, TranslationManifest, TranslationVerse } from '@/types/domain';
 import { normalizeTranslationText } from '../domain/translationText';
 
@@ -97,7 +98,7 @@ export async function installTranslation(
 ): Promise<'installed' | 'replaced'> {
   const existing = await db.getFirstAsync<{ id: string }>('SELECT id FROM translations WHERE id = ?', manifest.id);
   const now = Date.now();
-  await db.withExclusiveTransactionAsync(async (transaction) => {
+  await runAtomicWrite(db, async (transaction) => {
     await transaction.runAsync(
       `INSERT INTO translations (
         id, title, language, translator, source_name, source_url, license_name, license_url,

@@ -63,8 +63,20 @@ export function FolioScreen({
 
 const styles = StyleSheet.create({
   safeArea: { backgroundColor: colors.paper, flex: 1 },
-  scrollContent: { paddingBottom: 56, paddingHorizontal: spacing.lg },
-  staticContent: { flex: 1, paddingHorizontal: spacing.lg },
+  scrollContent: {
+    alignSelf: 'center',
+    maxWidth: 1120,
+    paddingBottom: 56,
+    paddingHorizontal: spacing.lg,
+    width: '100%',
+  },
+  staticContent: {
+    alignSelf: 'center',
+    flex: 1,
+    maxWidth: 1120,
+    paddingHorizontal: spacing.lg,
+    width: '100%',
+  },
   header: { paddingBottom: spacing.lg, paddingTop: spacing.md },
   rule: { backgroundColor: colors.gold, height: 2, marginBottom: 12, width: 42 },
   eyebrow: {
@@ -74,9 +86,21 @@ const styles = StyleSheet.create({
     letterSpacing: 2.2,
     marginBottom: 2,
   },
-  titleRow: { alignItems: 'center', flexDirection: 'row', gap: spacing.md, justifyContent: 'space-between' },
-  titleCopy: { flex: 1 },
-  title: { color: colors.ink, fontFamily: fontFamilies.display, fontSize: 40, lineHeight: 42 },
+  titleRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    justifyContent: 'space-between',
+  },
+  titleCopy: { flex: 1, minWidth: 0 },
+  title: {
+    color: colors.ink,
+    fontFamily: fontFamilies.display,
+    fontSize: 30,
+    flexShrink: 1,
+    lineHeight: 40,
+  },
   subtitle: {
     color: colors.inkMuted,
     fontFamily: fontFamilies.body,

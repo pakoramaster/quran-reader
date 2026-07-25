@@ -12,7 +12,8 @@ import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { listAnnotationsForSurah, saveAnnotation } from '@/features/annotations/data/annotationRepository';
 import { AnnotationEditor } from '@/features/annotations/ui/AnnotationEditor';
 import { getSurah, listAyahs } from '@/features/quran-reader/data/quranRepository';
-import { getSetting } from '@/features/settings/data/settingsRepository';
+import { DEFAULT_RECITER_ID, getReciter, isReciterId, RECITERS, type PlaybackMode, type ReciterId } from '@/features/recitation/domain/reciters';
+import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
 import {
   getActiveTranslationId,
@@ -33,6 +34,9 @@ export default function SurahReaderScreen() {
   const listRef = useRef<FlatList<ReaderAyah>>(null);
   const [editorAyah, setEditorAyah] = useState<ReaderAyah | null>(null);
   const [selectedAyahNumber, setSelectedAyahNumber] = useState<number | null>(null);
+  const [spokenAyahNumber, setSpokenAyahNumber] = useState<number | null>(null);
+  const [playbackModeOverride, setPlaybackModeOverride] = useState<PlaybackMode | null>(null);
+  const [reciterIdOverride, setReciterIdOverride] = useState<ReciterId | null>(null);
 
   const surah = useQuery({
     queryKey: ['surah', surahNumber],
@@ -66,6 +70,15 @@ export default function SurahReaderScreen() {
     }),
     enabled: Boolean(activeTranslation.data?.language),
   });
+  const playbackSettings = useQuery({
+    queryKey: ['recitation-settings'],
+    queryFn: async () => ({ mode: await getSetting(userDb, 'playback_mode'), reciter: await getSetting(userDb, 'reciter_id') }),
+  });
+  const storedMode = playbackSettings.data?.mode;
+  const playbackMode: PlaybackMode = playbackModeOverride
+    ?? (storedMode === 'recitation' || ((storedMode === 'translation' || storedMode === 'both') && activeTranslation.data) ? storedMode : 'recitation');
+  const storedReciter = playbackSettings.data?.reciter ?? null;
+  const reciterId = reciterIdOverride ?? (isReciterId(storedReciter) ? storedReciter : DEFAULT_RECITER_ID);
   const annotations = useQuery({
     queryKey: ['annotations', activeTranslation.data?.id, surahNumber],
     queryFn: () => listAnnotationsForSurah(userDb, activeTranslation.data!.id, surahNumber),
@@ -119,7 +132,6 @@ export default function SurahReaderScreen() {
   if (surah.isLoading || arabicAyahs.isLoading) return <LoadingFolio label="Setting the Ayahs…" />;
   if (!surah.data) return <EmptyFolio body="The requested Surah could not be found." glyph="؟" title="Surah not found" />;
 
-  const translationVerses = translatedAyahs.data ?? [];
   const isReading = speech.status === 'speaking';
   const [speechSurahPart, speechAyahPart] = speech.currentVerseKey?.split(':') ?? [];
   const speechAyahNumber = Number(speechAyahPart);
@@ -128,6 +140,7 @@ export default function SurahReaderScreen() {
     : null;
   const activeSpeechCursor = speech.status === 'speaking' || speech.status === 'paused' ? speechCursor : null;
   const playbackStartAyah = activeSpeechCursor
+    ?? spokenAyahNumber
     ?? selectedAyahNumber
     ?? speechCursor
     ?? (targetAyah > 0 ? targetAyah : null)
@@ -135,17 +148,33 @@ export default function SurahReaderScreen() {
   const selectAyah = (ayahNumber: number) => {
     if (speech.status === 'speaking' || speech.status === 'paused') void speech.stop();
     setSelectedAyahNumber(ayahNumber);
+    setSpokenAyahNumber(null);
   };
   const startSurahPlayback = () => {
-    const startIndex = translationVerses.findIndex((verse) => Number(verse.key.split(':')[1]) >= playbackStartAyah);
+    const startIndex = readerAyahs.findIndex((verse) => verse.ayahNumber >= playbackStartAyah);
     if (startIndex < 0) return;
     setSelectedAyahNumber(null);
-    speech.speakSurah(
-      translationVerses.slice(startIndex),
-      activeTranslation.data!.language,
+    speech.play(
+      readerAyahs.slice(startIndex).map((verse) => ({ key: verse.verseKey, text: verse.translationText ?? '' })),
+      playbackMode,
+      reciterId,
+      activeTranslation.data?.language,
       speechSettings.data?.voice ?? undefined,
       speechSettings.data?.rate,
     );
+  };
+
+  const chooseMode = (mode: PlaybackMode) => {
+    if (mode !== 'recitation' && !activeTranslation.data) return;
+    if (speech.status !== 'idle') void speech.stop();
+    setPlaybackModeOverride(mode);
+    void setSetting(userDb, 'playback_mode', mode);
+  };
+
+  const chooseReciter = (id: ReciterId) => {
+    if (speech.status !== 'idle') void speech.stop();
+    setReciterIdOverride(id);
+    void setSetting(userDb, 'reciter_id', id);
   };
 
   return (
@@ -161,13 +190,37 @@ export default function SurahReaderScreen() {
         <Text style={styles.headerArabic}>{surah.data.nameArabic}</Text>
       </View>
 
-      {activeTranslation.data ? (
+      <View style={styles.playbackOptions}>
+        <View style={styles.chipRow}>
+          {(['recitation', 'translation', 'both'] as const).map((mode) => {
+            const disabled = mode !== 'recitation' && !activeTranslation.data;
+            return (
+              <Pressable accessibilityRole="button" disabled={disabled} key={mode} onPress={() => chooseMode(mode)} style={[styles.modeChip, playbackMode === mode ? styles.modeChipActive : null, disabled ? styles.modeChipDisabled : null]}>
+                <Text style={[styles.modeChipText, playbackMode === mode ? styles.modeChipTextActive : null]}>{mode === 'recitation' ? 'Qur’an' : mode === 'translation' ? 'Translation' : 'Both'}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        {playbackMode !== 'translation' ? (
+          <View style={styles.chipRow}>
+            {RECITERS.map((reciter) => (
+              <Pressable accessibilityRole="button" key={reciter.id} onPress={() => chooseReciter(reciter.id)} style={[styles.reciterChip, reciterId === reciter.id ? styles.reciterChipActive : null]}>
+                <Text style={[styles.reciterChipText, reciterId === reciter.id ? styles.reciterChipTextActive : null]}>{reciter.id === 'husary' ? 'Al-Husary' : 'Abdul Basit'}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+      </View>
+
+      {playbackMode === 'recitation' || activeTranslation.data ? (
         <View style={styles.playbackBar}>
           <View style={styles.playbackCopy}>
-            <Text style={styles.playbackLabel}>{activeTranslation.data.title}</Text>
+            <Text style={styles.playbackLabel}>{playbackMode === 'translation' ? activeTranslation.data?.title : getReciter(reciterId).name}</Text>
             <Text style={styles.playbackState}>
               {speech.status === 'speaking' || speech.status === 'paused'
-                ? `Reading ${speech.currentVerseKey}`
+                ? `${speech.phase === 'recitation' ? 'Reciting' : 'Reading'} ${speech.currentVerseKey}`
+                : speech.status === 'loading' ? `Loading ${speech.currentVerseKey}`
+                : speech.status === 'error' ? speech.error
                 : `Start at ${surahNumber}:${playbackStartAyah}`}
             </Text>
           </View>
@@ -229,23 +282,24 @@ export default function SurahReaderScreen() {
               <View style={styles.ayahTopline}>
                 <Text style={styles.verseKey}>{item.verseKey}</Text>
                 <View style={styles.ayahActions}>
-                  {item.translationText ? (
-                    <Pressable
-                      accessibilityLabel={`Read verse ${item.verseKey} aloud`}
-                      onPress={(event) => {
-                        event.stopPropagation();
-                        speech.speakAyah(
-                          { key: item.verseKey, text: item.translationText! },
-                          activeTranslation.data!.language,
-                          speechSettings.data?.voice ?? undefined,
-                          speechSettings.data?.rate,
-                        );
-                      }}
-                      style={styles.iconButton}
-                    >
-                      <Ionicons color={colors.emerald} name="volume-medium-outline" size={20} />
-                    </Pressable>
-                  ) : null}
+                  <Pressable
+                    accessibilityLabel={`Play verse ${item.verseKey}`}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      setSpokenAyahNumber(item.ayahNumber);
+                      speech.play(
+                        [{ key: item.verseKey, text: item.translationText ?? '' }],
+                        playbackMode,
+                        reciterId,
+                        activeTranslation.data?.language,
+                        speechSettings.data?.voice ?? undefined,
+                        speechSettings.data?.rate,
+                      );
+                    }}
+                    style={styles.iconButton}
+                  >
+                    <Ionicons color={colors.emerald} name="volume-medium-outline" size={20} />
+                  </Pressable>
                   {activeTranslation.data ? (
                     <Pressable
                       accessibilityLabel={`Annotate verse ${item.verseKey}`}
@@ -299,6 +353,17 @@ const styles = StyleSheet.create({
   headerTitle: { color: colors.paperLight, fontFamily: fontFamilies.display, fontSize: 25 },
   headerArabic: { color: colors.paperLight, fontFamily: fontFamilies.arabicBold, fontSize: 23 },
   playbackBar: { alignItems: 'center', backgroundColor: colors.paperLight, borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: 'row', gap: 8, paddingHorizontal: 18, paddingVertical: 10 },
+  playbackOptions: { backgroundColor: colors.paperLight, borderBottomColor: colors.border, borderBottomWidth: 1, gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
+  chipRow: { flexDirection: 'row', gap: 8 },
+  modeChip: { borderColor: colors.border, borderRadius: 18, borderWidth: 1, paddingHorizontal: 13, paddingVertical: 7 },
+  modeChipActive: { backgroundColor: colors.emerald, borderColor: colors.emerald },
+  modeChipDisabled: { opacity: 0.38 },
+  modeChipText: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 13 },
+  modeChipTextActive: { color: colors.paperLight },
+  reciterChip: { borderBottomColor: 'transparent', borderBottomWidth: 2, paddingHorizontal: 4, paddingVertical: 4 },
+  reciterChipActive: { borderBottomColor: colors.gold },
+  reciterChipText: { color: colors.inkMuted, fontFamily: fontFamilies.body, fontSize: 13 },
+  reciterChipTextActive: { color: colors.ink, fontFamily: fontFamilies.bodyBold },
   playbackCopy: { flex: 1 },
   playbackLabel: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 16 },
   playbackState: { color: colors.inkMuted, fontFamily: fontFamilies.body, fontSize: 14 },

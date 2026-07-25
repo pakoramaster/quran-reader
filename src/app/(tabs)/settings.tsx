@@ -56,7 +56,7 @@ export default function SettingsScreen() {
   return (
     <FolioScreen
       eyebrow="Reading room preferences"
-      subtitle="Voice choices come from the operating system. Core reading, translations, and notes remain fully local."
+      subtitle="Translation voices come from the operating system. Qur’an recitations stream on demand; reading, translations, and notes remain local."
       title="Settings"
     >
       <Section icon="volume-medium-outline" title="Read aloud">
@@ -120,13 +120,14 @@ export default function SettingsScreen() {
       </Section>
 
       <Section icon="lock-closed-outline" title="Privacy & storage">
-        <Text style={styles.copy}>No account, backend, analytics service, or Quran API is used. Imports, notes, highlights, and preferences stay inside the app sandbox.</Text>
+        <Text style={styles.copy}>No account, analytics service, or app backend is used. Recitation audio is requested from EveryAyah only when you press play; imports, notes, highlights, and preferences stay inside the app sandbox.</Text>
         <Text style={styles.warning}>Uninstalling the app may remove your imported translations and annotations. Local storage is private, but it is not a backup.</Text>
       </Section>
 
       <View style={styles.attribution}>
         <Text style={styles.attributionTitle}>Tanzil Quran Text</Text>
         <Text style={styles.attributionBody}>Copyright © 2007–2026 Tanzil Project · Creative Commons Attribution 3.0 · tanzil.net</Text>
+        <Text style={styles.attributionBody}>Verse-by-verse recitation audio provided by EveryAyah.com.</Text>
       </View>
     </FolioScreen>
   );

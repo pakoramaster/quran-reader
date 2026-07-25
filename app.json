@@ -2,7 +2,7 @@
   "expo": {
     "name": "Quran Folio",
     "slug": "quran-folio",
-    "version": "0.1.0",
+    "version": "0.1.4",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "scheme": "quranfolio",
@@ -12,7 +12,8 @@
       "expo-document-picker",
       "expo-font",
       "expo-localization",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true
@@ -26,6 +27,10 @@
       "adaptiveIcon": {
         "backgroundColor": "#163F36"
       }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
     }
   }
 }

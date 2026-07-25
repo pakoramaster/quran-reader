@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { EmptyFolio } from '@/components/EmptyFolio';
 import { FolioButton } from '@/components/FolioButton';
@@ -10,6 +10,7 @@ import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
 import { useImportSession } from '@/features/translations/application/ImportSessionProvider';
 import { installTranslation } from '@/features/translations/data/translationRepository';
+import { requestConfirmation, showMessage } from '@/platform/dialogs/dialogs';
 import { colors, fontFamilies, spacing } from '@/theme/tokens';
 
 export default function ImportPreviewScreen() {
@@ -31,7 +32,7 @@ export default function ImportPreviewScreen() {
         queryClient.invalidateQueries({ queryKey: ['translation-verses'] }),
       ]);
       setSession(null);
-      Alert.alert(result === 'replaced' ? 'Translation replaced' : 'Translation installed',
+      showMessage(result === 'replaced' ? 'Translation replaced' : 'Translation installed',
         result === 'replaced'
           ? 'The imported text was replaced atomically. Notes and highlights were preserved.'
           : 'The translation is now active and available offline.');
@@ -51,19 +52,22 @@ export default function ImportPreviewScreen() {
       install.mutate();
       return;
     }
-    Alert.alert(
-      'Confirm your right to use this text',
-      'The source repository does not specify a licence for this translation. Continue only if you are authorized to use it.',
-      [{ text: 'Cancel', style: 'cancel' }, { text: 'I am authorized', onPress: () => install.mutate() }],
-    );
+    requestConfirmation({
+      title: 'Confirm your right to use this text',
+      message: 'The source repository does not specify a licence for this translation. Continue only if you are authorized to use it.',
+      confirmLabel: 'I am authorized',
+      onConfirm: () => install.mutate(),
+    });
   };
   const confirm = () => {
     if (replacement) {
-      Alert.alert(
-        'Replace this translation?',
-        `${session.changedVerseCount?.toLocaleString()} verses differ. The replacement is atomic and your annotations will be retained.`,
-        [{ text: 'Cancel', style: 'cancel' }, { text: 'Replace', style: 'destructive', onPress: installAfterRightsCheck }],
-      );
+      requestConfirmation({
+        title: 'Replace this translation?',
+        message: `${session.changedVerseCount?.toLocaleString()} verses differ. The replacement is atomic and your annotations will be retained.`,
+        confirmLabel: 'Replace',
+        destructive: true,
+        onConfirm: installAfterRightsCheck,
+      });
       return;
     }
     installAfterRightsCheck();
