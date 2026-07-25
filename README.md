@@ -50,3 +50,19 @@ platform-adapter architecture.
 
 See `docs/TRANSLATION_FORMAT.md` for the import contract and
 `docs/DATA_PROVENANCE.md` for Quran source and licensing details.
+
+## Automated releases
+
+Every push to `main` builds Windows and signed Android packages and publishes
+them to a new GitHub release. Configure these repository Actions secrets before
+the workflow runs:
+
+- `ANDROID_KEYSTORE_BASE64`: Base64-encoded Android release `.jks` keystore.
+- `ANDROID_KEYSTORE_PASSWORD`: Android keystore password.
+- `ANDROID_KEY_ALIAS`: Android signing key alias.
+- `ANDROID_KEY_PASSWORD`: Android signing key password.
+
+The Android signing file must be backed up securely and must never be committed.
+Windows installers are currently unsigned and can trigger Microsoft SmartScreen
+warnings. Releases use tags in the form `v0.1.4-build.123`, combining the
+package version with the GitHub Actions run number.

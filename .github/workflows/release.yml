@@ -1,0 +1,159 @@
+name: Build and release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build NSIS installer
+        run: npm run desktop:package
+
+      - name: Stage installer artifact
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path release -Filter *.exe -File |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw "No Windows installer was produced"
+          }
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+          Copy-Item $installer.FullName "artifacts/Quran-Folio-Windows.exe"
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows
+          path: artifacts/Quran-Folio-Windows.exe
+          if-no-files-found: error
+
+  android:
+    name: Build signed Android packages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Restore Android signing keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for variable in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!variable:-}" ]; then
+              echo "Required secret $variable is not configured" >&2
+              exit 1
+            fi
+          done
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/android-release.jks"
+
+      - name: Read application version
+        id: version
+        shell: bash
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed APK and app bundle
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/android-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_VERSION_CODE: ${{ github.run_number }}
+          APP_VERSION: ${{ steps.version.outputs.value }}
+        run: ./gradlew assembleRelease bundleRelease --no-daemon
+
+      - name: Stage Android artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cp android/app/build/outputs/apk/release/app-release.apk artifacts/Quran-Folio-Android.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab artifacts/Quran-Folio-Android.aab
+
+      - name: Upload Android builds
+        uses: actions/upload-artifact@v6
+        with:
+          name: android
+          path: artifacts/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs:
+      - windows
+      - android
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Download builds
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Determine release version
+        id: version
+        shell: bash
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          echo "tag=v${package_version}-build.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "name=Quran Folio ${package_version} build ${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.name }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: artifacts/*
