@@ -3,6 +3,13 @@ import type { CSSProperties } from 'react';
 export function normalizeWebTextInputStyle(style: CSSProperties, multiline: boolean): CSSProperties {
   const lineHeight = typeof style.lineHeight === 'number' ? `${style.lineHeight}px` : style.lineHeight;
   return {
+    appearance: 'none',
+    backgroundColor: 'transparent',
+    border: 0,
+    margin: 0,
+    minWidth: 0,
+    outline: 'none',
+    padding: 0,
     ...style,
     boxSizing: 'border-box',
     flex: multiline ? '0 0 150px' : style.flex,
