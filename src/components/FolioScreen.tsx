@@ -63,8 +63,20 @@ export function FolioScreen({
 
 const styles = StyleSheet.create({
   safeArea: { backgroundColor: colors.paper, flex: 1 },
-  scrollContent: { paddingBottom: 56, paddingHorizontal: spacing.lg },
-  staticContent: { flex: 1, paddingHorizontal: spacing.lg },
+  scrollContent: {
+    alignSelf: 'center',
+    maxWidth: 1120,
+    paddingBottom: 56,
+    paddingHorizontal: spacing.lg,
+    width: '100%',
+  },
+  staticContent: {
+    alignSelf: 'center',
+    flex: 1,
+    maxWidth: 1120,
+    paddingHorizontal: spacing.lg,
+    width: '100%',
+  },
   header: { paddingBottom: spacing.lg, paddingTop: spacing.md },
   rule: { backgroundColor: colors.gold, height: 2, marginBottom: 12, width: 42 },
   eyebrow: {

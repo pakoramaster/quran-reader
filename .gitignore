@@ -6,6 +6,7 @@ node_modules/
 .expo-shared/
 dist/
 web-build/
+release/
 expo-env.d.ts
 .metro-health-check*
 

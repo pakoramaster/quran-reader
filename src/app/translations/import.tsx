@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import * as Crypto from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
-import { File } from 'expo-file-system';
 import { router } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useState } from 'react';
@@ -14,6 +13,7 @@ import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { listCanonicalVerseKeys } from '@/features/quran-reader/data/quranRepository';
 import { useImportSession } from '@/features/translations/application/ImportSessionProvider';
 import { countChangedVerses } from '@/features/translations/data/translationRepository';
+import { readPickedDocument } from '@/platform/documents/readPickedDocument';
 import {
   MAX_TRANSLATION_FILE_BYTES,
   validateTranslationFile,
@@ -47,8 +47,7 @@ export default function ImportTranslationScreen() {
         setIssues([{ code: 'schema', message: 'The file is larger than the 10 MB import limit.' }]);
         return;
       }
-      const file = new File(asset.uri);
-      const raw = await file.text();
+      const raw = await readPickedDocument(asset);
       if (new TextEncoder().encode(raw).byteLength > MAX_TRANSLATION_FILE_BYTES) {
         setIssues([{ code: 'schema', message: 'The file is larger than the 10 MB import limit.' }]);
         return;

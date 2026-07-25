@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { useDeferredValue, useMemo, useState } from 'react';
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { EmptyFolio } from '@/components/EmptyFolio';
 import { FolioScreen } from '@/components/FolioScreen';
@@ -10,7 +10,8 @@ import { LoadingFolio } from '@/components/LoadingFolio';
 import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { listAnnotatedAyahs } from '@/features/annotations/data/annotationRepository';
 import { listTranslations } from '@/features/translations/data/translationRepository';
-import { colors, fontFamilies, spacing } from '@/theme/tokens';
+import { FolioTextInput } from '@/platform/ui/FolioTextInput';
+import { colors, fontFamilies } from '@/theme/tokens';
 import type { AnnotatedAyah, HighlightColor } from '@/types/domain';
 
 const highlightFilters: (HighlightColor | null)[] = [null, 'amber', 'sage', 'sky', 'rose'];
@@ -40,7 +41,7 @@ export default function NotesScreen() {
     >
       <View style={styles.searchBox}>
         <Ionicons color={colors.gold} name="search" size={20} />
-        <TextInput
+        <FolioTextInput
           accessibilityLabel="Search notes and translation text"
           onChangeText={setSearch}
           placeholder="Search your reflections…"

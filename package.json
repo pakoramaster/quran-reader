@@ -1,6 +1,8 @@
 {
   "name": "quran-folio",
-  "version": "0.1.0",
+  "version": "0.1.4",
+  "description": "An offline-first Quran reader for mobile and Windows.",
+  "author": "Quran Folio contributors",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
@@ -8,12 +10,45 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "web:build": "expo export --platform web",
+    "desktop:dev": "node desktop/dev.mjs",
+    "desktop:run": "node desktop/run.mjs desktop/main.cjs",
+    "desktop:build": "npm run web:build && electron-builder --win --dir",
+    "desktop:package": "npm run web:build && electron-builder --win nsis",
     "build:quran": "node scripts/build-quran-database.mjs",
     "verify:quran": "node scripts/verify-quran-database.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "expo lint",
     "test": "jest --runInBand",
     "test:watch": "jest --watch"
+  },
+  "build": {
+    "appId": "com.quranfolio.app",
+    "productName": "Quran Folio",
+    "extraMetadata": {
+      "main": "desktop/main.cjs"
+    },
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/*.cjs",
+      "dist/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   },
   "jest": {
     "preset": "jest-expo",
@@ -58,6 +93,8 @@
     "@types/jest": "^29.5.14",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.39.5",
     "eslint-config-expo": "^57.0.0",
     "jest": "^29.7.0",
