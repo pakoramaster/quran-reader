@@ -12,7 +12,8 @@
       "expo-document-picker",
       "expo-font",
       "expo-localization",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true
