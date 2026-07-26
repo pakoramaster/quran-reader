@@ -9,6 +9,11 @@ on:
 permissions:
   contents: write
 
+env:
+  NPM_CONFIG_FETCH_RETRIES: 5
+  NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: 20000
+  NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: 120000
+
 concurrency:
   group: release-main
   cancel-in-progress: false
@@ -29,7 +34,19 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            npm ci --no-audit --no-fund
+            if ($LASTEXITCODE -eq 0) {
+              break
+            }
+            if ($attempt -eq 3) {
+              throw "npm ci failed after $attempt attempts"
+            }
+            Write-Warning "npm ci attempt $attempt failed; retrying in 10 seconds"
+            Start-Sleep -Seconds 10
+          }
 
       - name: Build NSIS installer
         run: npm run desktop:package
@@ -74,7 +91,20 @@ jobs:
           cache: gradle
 
       - name: Install dependencies
-        run: npm ci
+        shell: bash
+        run: |
+          set -u
+          for attempt in 1 2 3; do
+            if npm ci --no-audit --no-fund; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "npm ci failed after $attempt attempts" >&2
+              exit 1
+            fi
+            echo "npm ci attempt $attempt failed; retrying in 10 seconds" >&2
+            sleep 10
+          done
 
       - name: Restore Android signing keystore
         shell: bash
