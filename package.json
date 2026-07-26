@@ -14,7 +14,7 @@
     "desktop:dev": "node desktop/dev.mjs",
     "desktop:run": "node desktop/run.mjs desktop/main.cjs",
     "desktop:build": "npm run web:build && electron-builder --win --dir",
-    "desktop:package": "npm run web:build && electron-builder --win nsis",
+    "desktop:package": "npm run web:build && electron-builder --win nsis --publish never",
     "build:quran": "node scripts/build-quran-database.mjs",
     "verify:quran": "node scripts/verify-quran-database.mjs",
     "typecheck": "tsc --noEmit",
