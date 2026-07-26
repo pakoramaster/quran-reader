@@ -53,9 +53,9 @@ See `docs/TRANSLATION_FORMAT.md` for the import contract and
 
 ## Automated releases
 
-Every push to `main` builds Windows and signed Android packages and publishes
-them to a new GitHub release. Configure these repository Actions secrets before
-the workflow runs:
+Every push to `main` builds current Windows, Windows 7, and signed Android APK
+packages and publishes them to a GitHub release. Configure these repository
+Actions secrets before the workflow runs:
 
 - `ANDROID_KEYSTORE_BASE64`: Base64-encoded Android release `.jks` keystore.
 - `ANDROID_KEYSTORE_PASSWORD`: Android keystore password.
@@ -64,5 +64,6 @@ the workflow runs:
 
 The Android signing file must be backed up securely and must never be committed.
 Windows installers are currently unsigned and can trigger Microsoft SmartScreen
-warnings. Releases use tags in the form `v0.1.4-build.123`, combining the
-package version with the GitHub Actions run number.
+warnings. The Windows 7 package uses the unsupported Electron 22 runtime and is
+provided only for legacy compatibility. Releases use the package version as the
+tag, such as `v0.1.4`; pushes without a version change update that release.

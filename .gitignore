@@ -7,6 +7,7 @@ node_modules/
 dist/
 web-build/
 release/
+release-win7/
 expo-env.d.ts
 .metro-health-check*
 
