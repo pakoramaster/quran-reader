@@ -1,6 +1,6 @@
 {
   "name": "quran-folio",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "An offline-first Quran reader for mobile and Windows.",
   "author": "Quran Folio contributors",
   "private": true,
@@ -15,6 +15,7 @@
     "desktop:run": "node desktop/run.mjs desktop/main.cjs",
     "desktop:build": "npm run web:build && electron-builder --win --dir",
     "desktop:package": "npm run web:build && electron-builder --win nsis --publish never",
+    "desktop:package:win7": "electron-builder --win nsis --publish never -c.electronVersion=22.3.27 -c.directories.output=release-win7",
     "build:quran": "node scripts/build-quran-database.mjs",
     "verify:quran": "node scripts/verify-quran-database.mjs",
     "typecheck": "tsc --noEmit",

@@ -51,22 +51,31 @@ jobs:
       - name: Build NSIS installer
         run: npm run desktop:package
 
-      - name: Stage installer artifact
+      - name: Build Windows 7 NSIS installer
+        run: npm run desktop:package:win7
+
+      - name: Stage installer artifacts
         shell: pwsh
         run: |
           $installer = Get-ChildItem -Path release -Filter *.exe -File |
             Select-Object -First 1
           if (-not $installer) {
-            throw "No Windows installer was produced"
+            throw "No current Windows installer was produced"
+          }
+          $windows7Installer = Get-ChildItem -Path release-win7 -Filter *.exe -File |
+            Select-Object -First 1
+          if (-not $windows7Installer) {
+            throw "No Windows 7 installer was produced"
           }
           New-Item -ItemType Directory -Path artifacts -Force | Out-Null
           Copy-Item $installer.FullName "artifacts/Quran-Folio-Windows.exe"
+          Copy-Item $windows7Installer.FullName "artifacts/Quran-Folio-Windows-7.exe"
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v6
         with:
           name: windows
-          path: artifacts/Quran-Folio-Windows.exe
+          path: artifacts/*.exe
           if-no-files-found: error
 
   android:
@@ -128,7 +137,7 @@ jobs:
         shell: bash
         run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
-      - name: Build signed APK and app bundle
+      - name: Build signed APK
         working-directory: android
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/android-release.jks
@@ -137,7 +146,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_VERSION_CODE: ${{ github.run_number }}
           APP_VERSION: ${{ steps.version.outputs.value }}
-        run: ./gradlew assembleRelease bundleRelease --no-daemon
+        run: ./gradlew assembleRelease --no-daemon
 
       - name: Stage Android artifacts
         shell: bash
@@ -145,7 +154,6 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts
           cp android/app/build/outputs/apk/release/app-release.apk artifacts/Quran-Folio-Android.apk
-          cp android/app/build/outputs/bundle/release/app-release.aab artifacts/Quran-Folio-Android.aab
 
       - name: Upload Android builds
         uses: actions/upload-artifact@v6
@@ -176,8 +184,8 @@ jobs:
         shell: bash
         run: |
           package_version="$(node -p "require('./package.json').version")"
-          echo "tag=v${package_version}-build.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-          echo "name=Quran Folio ${package_version} build ${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${package_version}" >> "$GITHUB_OUTPUT"
+          echo "name=Quran Folio ${package_version}" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
         uses: softprops/action-gh-release@v3
