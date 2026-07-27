@@ -7,7 +7,7 @@ import { FolioTextInput } from '@/platform/ui/FolioTextInput';
 import { colors, fontFamilies, spacing } from '@/theme/tokens';
 import type { HighlightColor, ReaderAyah } from '@/types/domain';
 
-const highlightColors: HighlightColor[] = ['amber', 'sage', 'sky', 'rose'];
+const highlightColors: (HighlightColor | null)[] = [null, 'amber', 'sage', 'sky', 'rose'];
 
 interface AnnotationEditorProps {
   ayah: ReaderAyah | null;
@@ -19,7 +19,7 @@ interface AnnotationEditorProps {
 
 export function AnnotationEditor({ ayah, visible, saving, onClose, onSave }: AnnotationEditorProps) {
   const [note, setNote] = useState(() => ayah?.annotation?.noteText ?? '');
-  const [highlight, setHighlight] = useState<HighlightColor | null>(() => ayah?.annotation?.highlightColor ?? 'amber');
+  const [highlight, setHighlight] = useState<HighlightColor | null>(() => ayah?.annotation?.highlightColor ?? null);
 
   if (!ayah) return null;
   return (
@@ -45,20 +45,20 @@ export function AnnotationEditor({ ayah, visible, saving, onClose, onSave }: Ann
         <View style={styles.swatches}>
           {highlightColors.map((color) => (
             <Pressable
-              accessibilityLabel={`${color} highlight`}
+              accessibilityLabel={color ? `${color} highlight` : 'No highlight color'}
               accessibilityRole="button"
-              key={color}
-              onPress={() => setHighlight((current) => current === color ? null : color)}
+              accessibilityState={{ selected: highlight === color }}
+              key={color ?? 'none'}
+              onPress={() => setHighlight(color)}
               style={[
                 styles.swatch,
-                { backgroundColor: colors.highlight[color] },
+                color ? { backgroundColor: colors.highlight[color] } : styles.noColorSwatch,
                 highlight === color ? styles.swatchSelected : null,
               ]}
-            />
+            >
+              {!color ? <View pointerEvents="none" style={styles.noColorSlash} /> : null}
+            </Pressable>
           ))}
-          <Pressable onPress={() => setHighlight(null)} style={styles.clearHighlight}>
-            <Text style={styles.clearLabel}>CLEAR</Text>
-          </Pressable>
         </View>
         <View style={styles.actions}>
           <FolioButton label="Cancel" onPress={onClose} style={styles.action} variant="quiet" />
@@ -92,11 +92,11 @@ const styles = StyleSheet.create({
     minHeight: 180,
     padding: 16,
   },
-  swatches: { alignItems: 'center', flexDirection: 'row', gap: 14 },
+  swatches: { alignItems: 'center', flexDirection: 'row', gap: 12 },
   swatch: { borderColor: colors.paperLight, borderRadius: 22, borderWidth: 4, height: 44, width: 44 },
+  noColorSwatch: { backgroundColor: 'transparent', borderColor: colors.border },
+  noColorSlash: { backgroundColor: colors.oxblood, height: 2, left: 2, position: 'absolute', top: 17, transform: [{ rotate: '-45deg' }], width: 32 },
   swatchSelected: { borderColor: colors.emerald, transform: [{ scale: 1.08 }] },
-  clearHighlight: { padding: 8 },
-  clearLabel: { color: colors.oxblood, fontFamily: fontFamilies.bodyBold, fontSize: 12, letterSpacing: 1 },
   actions: { flexDirection: 'row', gap: 12, marginTop: 'auto', paddingBottom: 20 },
   action: { flex: 1 },
 });

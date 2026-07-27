@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
+import { useSQLiteContext } from 'expo-sqlite';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -8,20 +9,30 @@ import { EmptyFolio } from '@/components/EmptyFolio';
 import { FolioScreen } from '@/components/FolioScreen';
 import { LoadingFolio } from '@/components/LoadingFolio';
 import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
-import { listAnnotatedAyahs } from '@/features/annotations/data/annotationRepository';
+import {
+  deleteAnnotation,
+  listAnnotatedAyahs,
+  saveAnnotation,
+} from '@/features/annotations/data/annotationRepository';
+import { AnnotationEditor } from '@/features/annotations/ui/AnnotationEditor';
+import { getAyah } from '@/features/quran-reader/data/quranRepository';
 import { listTranslations } from '@/features/translations/data/translationRepository';
+import { requestConfirmation, showMessage } from '@/platform/dialogs/dialogs';
 import { FolioTextInput } from '@/platform/ui/FolioTextInput';
 import { colors, fontFamilies } from '@/theme/tokens';
-import type { AnnotatedAyah, HighlightColor } from '@/types/domain';
+import type { AnnotatedAyah, HighlightColor, ReaderAyah } from '@/types/domain';
 
 const highlightFilters: (HighlightColor | null)[] = [null, 'amber', 'sage', 'sky', 'rose'];
 
 export default function NotesScreen() {
   const db = useUserDatabase();
+  const quranDb = useSQLiteContext();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
   const [translationId, setTranslationId] = useState<string | null>(null);
   const [color, setColor] = useState<HighlightColor | null>(null);
+  const [editorAyah, setEditorAyah] = useState<ReaderAyah | null>(null);
   const translations = useQuery({ queryKey: ['translations'], queryFn: () => listTranslations(db) });
   const annotations = useQuery({
     queryKey: ['annotated-ayahs', deferredSearch, translationId, color],
@@ -31,6 +42,76 @@ export default function NotesScreen() {
     () => translations.data?.find((item) => item.id === translationId)?.title ?? 'All translations',
     [translationId, translations.data],
   );
+
+  const saveMutation = useMutation({
+    mutationFn: ({
+      ayah,
+      note,
+      highlight,
+    }: {
+      ayah: ReaderAyah;
+      note: string | null;
+      highlight: HighlightColor | null;
+    }) => {
+      if (!ayah.annotation) throw new Error('The note is no longer available.');
+      return saveAnnotation(db, {
+        translationId: ayah.annotation.translationId,
+        surahNumber: ayah.surahNumber,
+        ayahNumber: ayah.ayahNumber,
+        noteText: note,
+        highlightColor: highlight,
+      });
+    },
+    onSuccess: async () => {
+      setEditorAyah(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['annotated-ayahs'] }),
+        queryClient.invalidateQueries({ queryKey: ['annotations'] }),
+      ]);
+    },
+    onError: (error) => showMessage('Could not save note', error.message),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: (annotation: AnnotatedAyah) => deleteAnnotation(
+      db,
+      annotation.surahNumber,
+      annotation.ayahNumber,
+    ),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['annotated-ayahs'] }),
+        queryClient.invalidateQueries({ queryKey: ['annotations'] }),
+      ]);
+    },
+    onError: (error) => showMessage('Could not delete note', error.message),
+  });
+
+  const editAnnotation = async (annotation: AnnotatedAyah) => {
+    try {
+      const ayah = await getAyah(quranDb, annotation.surahNumber, annotation.ayahNumber);
+      if (!ayah) {
+        showMessage('Could not open note', `Verse ${annotation.verseKey} was not found.`);
+        return;
+      }
+      setEditorAyah({
+        ...ayah,
+        annotation,
+        translationText: annotation.translationText,
+      });
+    } catch (error) {
+      showMessage('Could not open note', error instanceof Error ? error.message : 'The verse could not be loaded.');
+    }
+  };
+
+  const confirmDelete = (annotation: AnnotatedAyah) => {
+    requestConfirmation({
+      title: 'Delete note?',
+      message: `This removes the note and any highlight from verse ${annotation.verseKey}. This cannot be undone.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+      onConfirm: () => deleteMutation.mutate(annotation),
+    });
+  };
 
   return (
     <FolioScreen
@@ -89,7 +170,7 @@ export default function NotesScreen() {
           contentContainerStyle={styles.list}
           data={annotations.data ?? []}
           initialNumToRender={10}
-          keyExtractor={(annotation) => `${annotation.translationId}-${annotation.verseKey}`}
+          keyExtractor={(annotation) => annotation.verseKey}
           ListEmptyComponent={
             <EmptyFolio
               body="Notes and whole-Ayah highlights you add in the reader will gather here."
@@ -97,37 +178,90 @@ export default function NotesScreen() {
               title={search || translationId || color ? 'No matching reflections' : 'The margins are quiet'}
             />
           }
-          renderItem={({ item }) => <AnnotationCard annotation={item} />}
+          renderItem={({ item }) => (
+            <AnnotationCard
+              annotation={item}
+              deleting={deleteMutation.isPending && deleteMutation.variables?.verseKey === item.verseKey}
+              onDelete={confirmDelete}
+              onEdit={(annotation) => void editAnnotation(annotation)}
+            />
+          )}
           showsVerticalScrollIndicator={false}
         />
       )}
+      <AnnotationEditor
+        ayah={editorAyah}
+        key={editorAyah ? `${editorAyah.verseKey}-${editorAyah.annotation?.updatedAt ?? 0}` : 'closed'}
+        onClose={() => setEditorAyah(null)}
+        onSave={(note, highlight) => {
+          if (editorAyah) saveMutation.mutate({ ayah: editorAyah, note, highlight });
+        }}
+        saving={saveMutation.isPending}
+        visible={Boolean(editorAyah)}
+      />
     </FolioScreen>
   );
 }
 
-function AnnotationCard({ annotation }: { annotation: AnnotatedAyah }) {
+interface AnnotationCardProps {
+  annotation: AnnotatedAyah;
+  deleting: boolean;
+  onDelete: (annotation: AnnotatedAyah) => void;
+  onEdit: (annotation: AnnotatedAyah) => void;
+}
+
+export function AnnotationCard({ annotation, deleting, onDelete, onEdit }: AnnotationCardProps) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={() => router.push({
-        pathname: '/surah/[surahNumber]',
-        params: { surahNumber: annotation.surahNumber, ayah: annotation.ayahNumber },
-      })}
-      style={({ pressed }) => [
+    <View
+      style={[
         styles.noteCard,
         annotation.highlightColor ? { backgroundColor: colors.highlight[annotation.highlightColor] } : null,
-        pressed ? styles.pressed : null,
       ]}
     >
-      <View style={styles.noteTopline}>
-        <Text style={styles.verseKey}>{annotation.verseKey}</Text>
-        <Text numberOfLines={1} style={styles.translationTitle}>{annotation.translationTitle}</Text>
-        <Ionicons color={colors.gold} name="arrow-forward" size={18} />
+      <Pressable
+        accessibilityLabel={`Open verse ${annotation.verseKey}`}
+        accessibilityRole="button"
+        onPress={() => router.push({
+          pathname: '/surah/[surahNumber]',
+          params: { surahNumber: annotation.surahNumber, ayah: annotation.ayahNumber },
+        })}
+        style={({ pressed }) => [styles.noteContent, pressed ? styles.pressed : null]}
+      >
+        <View style={styles.noteTopline}>
+          <Text style={styles.verseKey}>{annotation.verseKey}</Text>
+          <Text numberOfLines={1} style={styles.translationTitle}>{annotation.translationTitle}</Text>
+          <Ionicons color={colors.gold} name="arrow-forward" size={18} />
+        </View>
+        {annotation.noteText ? <Text style={styles.noteText}>{annotation.noteText}</Text> : null}
+        <Text numberOfLines={3} style={styles.verseText}>{annotation.translationText}</Text>
+        <Text style={styles.updated}>Updated {new Date(annotation.updatedAt).toLocaleDateString()}</Text>
+      </Pressable>
+      <View style={styles.noteActions}>
+        <Pressable
+          accessibilityLabel={`Edit note for verse ${annotation.verseKey}`}
+          accessibilityRole="button"
+          onPress={() => onEdit(annotation)}
+          style={({ pressed }) => [styles.noteAction, pressed ? styles.actionPressed : null]}
+        >
+          <Ionicons color={colors.emerald} name="create-outline" size={18} />
+          <Text style={styles.editActionLabel}>Edit</Text>
+        </Pressable>
+        <Pressable
+          accessibilityLabel={`Delete note for verse ${annotation.verseKey}`}
+          accessibilityRole="button"
+          disabled={deleting}
+          onPress={() => onDelete(annotation)}
+          style={({ pressed }) => [
+            styles.noteAction,
+            pressed ? styles.actionPressed : null,
+            deleting ? styles.actionDisabled : null,
+          ]}
+        >
+          <Ionicons color={colors.oxblood} name="trash-outline" size={18} />
+          <Text style={styles.deleteActionLabel}>{deleting ? 'Deleting\u2026' : 'Delete'}</Text>
+        </Pressable>
       </View>
-      {annotation.noteText ? <Text style={styles.noteText}>{annotation.noteText}</Text> : null}
-      <Text numberOfLines={3} style={styles.verseText}>{annotation.translationText}</Text>
-      <Text style={styles.updated}>Updated {new Date(annotation.updatedAt).toLocaleDateString()}</Text>
-    </Pressable>
+    </View>
   );
 }
 
@@ -153,7 +287,8 @@ const styles = StyleSheet.create({
   colorChip: { alignItems: 'center', borderColor: colors.border, borderRadius: 18, borderWidth: 2, height: 36, justifyContent: 'center', width: 36 },
   colorChipActive: { borderColor: colors.emerald, transform: [{ scale: 1.1 }] },
   allColor: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 9 },
-  noteCard: { backgroundColor: colors.paperLight, borderColor: colors.border, borderRadius: 3, borderWidth: 1, marginTop: 14, padding: 16 },
+  noteCard: { backgroundColor: colors.paperLight, borderColor: colors.border, borderRadius: 3, borderWidth: 1, marginTop: 14, overflow: 'hidden' },
+  noteContent: { padding: 16 },
   pressed: { opacity: 0.72 },
   noteTopline: { alignItems: 'center', flexDirection: 'row', gap: 10 },
   verseKey: { color: colors.gold, fontFamily: fontFamilies.bodyBold, fontSize: 12, letterSpacing: 1.1 },
@@ -161,4 +296,10 @@ const styles = StyleSheet.create({
   noteText: { color: colors.ink, fontFamily: fontFamilies.displayItalic, fontSize: 21, lineHeight: 26, marginTop: 12 },
   verseText: { color: colors.inkMuted, fontFamily: fontFamilies.body, fontSize: 16, lineHeight: 21, marginTop: 8 },
   updated: { color: colors.inkMuted, fontFamily: fontFamilies.bodyBold, fontSize: 9, letterSpacing: 1, marginTop: 12, textTransform: 'uppercase' },
+  noteActions: { borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 8, paddingVertical: 5 },
+  noteAction: { alignItems: 'center', flexDirection: 'row', gap: 6, minHeight: 44, paddingHorizontal: 12 },
+  actionPressed: { opacity: 0.6 },
+  actionDisabled: { opacity: 0.45 },
+  editActionLabel: { color: colors.emerald, fontFamily: fontFamilies.bodyBold, fontSize: 14 },
+  deleteActionLabel: { color: colors.oxblood, fontFamily: fontFamilies.bodyBold, fontSize: 14 },
 });
