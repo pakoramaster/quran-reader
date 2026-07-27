@@ -53,7 +53,11 @@ const SpeechContext = createContext<SpeechContextValue | null>(null);
 
 export function SpeechProvider({ children }: PropsWithChildren) {
   const [state, setState] = useState<SpeechState>(initialState);
-  const player = useAudioPlayer(null, { updateInterval: 250, keepAudioSessionActive: true });
+  const player = useAudioPlayer(null, {
+    crossOrigin: 'anonymous',
+    updateInterval: 250,
+    keepAudioSessionActive: true,
+  });
   const playerStatus = useAudioPlayerStatus(player);
   const queueRef = useRef<QueueConfig | null>(null);
   const indexRef = useRef(0);
