@@ -34,13 +34,17 @@ export default function NotesScreen() {
   const [color, setColor] = useState<HighlightColor | null>(null);
   const [editorAyah, setEditorAyah] = useState<ReaderAyah | null>(null);
   const translations = useQuery({ queryKey: ['translations'], queryFn: () => listTranslations(db) });
+  const effectiveTranslationId = translationId && translations.data
+    && !translations.data.some((item) => item.id === translationId)
+    ? null
+    : translationId;
   const annotations = useQuery({
-    queryKey: ['annotated-ayahs', deferredSearch, translationId, color],
-    queryFn: () => listAnnotatedAyahs(db, deferredSearch, translationId, color),
+    queryKey: ['annotated-ayahs', deferredSearch, effectiveTranslationId, color],
+    queryFn: () => listAnnotatedAyahs(db, deferredSearch, effectiveTranslationId, color),
   });
   const selectedTranslationName = useMemo(
-    () => translations.data?.find((item) => item.id === translationId)?.title ?? 'All translations',
-    [translationId, translations.data],
+    () => translations.data?.find((item) => item.id === effectiveTranslationId)?.title ?? 'All translations',
+    [effectiveTranslationId, translations.data],
   );
 
   const saveMutation = useMutation({
@@ -135,10 +139,10 @@ export default function NotesScreen() {
 
       <Text style={styles.filterLabel}>TRANSLATION · {selectedTranslationName}</Text>
       <View style={styles.chipRow}>
-        <FilterChip active={!translationId} label="All" onPress={() => setTranslationId(null)} />
+        <FilterChip active={!effectiveTranslationId} label="All" onPress={() => setTranslationId(null)} />
         {translations.data?.map((translation) => (
           <FilterChip
-            active={translationId === translation.id}
+            active={effectiveTranslationId === translation.id}
             key={translation.id}
             label={translation.title}
             onPress={() => setTranslationId(translation.id)}
@@ -175,7 +179,7 @@ export default function NotesScreen() {
             <EmptyFolio
               body="Notes and whole-Ayah highlights you add in the reader will gather here."
               glyph="✦"
-              title={search || translationId || color ? 'No matching reflections' : 'The margins are quiet'}
+              title={search || effectiveTranslationId || color ? 'No matching reflections' : 'The margins are quiet'}
             />
           }
           renderItem={({ item }) => (

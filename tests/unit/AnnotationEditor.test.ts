@@ -1,7 +1,9 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 
 import { AnnotationEditor } from '@/features/annotations/ui/AnnotationEditor';
+import { spacing } from '@/theme/tokens';
 import type { HighlightColor, ReaderAyah } from '@/types/domain';
 
 function makeAyah(noteText: string | null = null, highlightColor: HighlightColor | null = null): ReaderAyah {
@@ -87,5 +89,23 @@ describe('AnnotationEditor', () => {
       'sky highlight',
       'rose highlight',
     ]);
+  });
+
+  it('keeps the actions inside safe, keyboard-scrollable modal content', async () => {
+    const { result } = await renderEditor();
+    const safeArea = result.getByTestId('annotation-editor-safe-area');
+    const scrollView = result.getByTestId('annotation-editor-scroll');
+    const actions = result.getByTestId('annotation-editor-actions');
+    const actionStyle = StyleSheet.flatten(actions.props.style);
+
+    expect(safeArea.props.edges).toEqual({
+      bottom: 'additive',
+      left: 'additive',
+      right: 'additive',
+      top: 'off',
+    });
+    expect(scrollView.props.keyboardShouldPersistTaps).toBe('handled');
+    expect(actionStyle.marginTop).toBe(spacing.lg);
+    expect(actionStyle.marginTop).not.toBe('auto');
   });
 });
