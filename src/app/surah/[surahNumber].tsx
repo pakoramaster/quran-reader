@@ -80,9 +80,9 @@ export default function SurahReaderScreen() {
   const storedReciter = playbackSettings.data?.reciter ?? null;
   const reciterId = reciterIdOverride ?? (isReciterId(storedReciter) ? storedReciter : DEFAULT_RECITER_ID);
   const annotations = useQuery({
-    queryKey: ['annotations', activeTranslation.data?.id, surahNumber],
-    queryFn: () => listAnnotationsForSurah(userDb, activeTranslation.data!.id, surahNumber),
-    enabled: Boolean(activeTranslation.data?.id),
+    queryKey: ['annotations', surahNumber],
+    queryFn: () => listAnnotationsForSurah(userDb, surahNumber),
+    enabled: Number.isInteger(surahNumber) && surahNumber >= 1 && surahNumber <= 114,
   });
 
   const readerAyahs = useMemo<ReaderAyah[]>(() => {
@@ -120,7 +120,7 @@ export default function SurahReaderScreen() {
     onSuccess: async () => {
       setEditorAyah(null);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['annotations', activeTranslation.data?.id, surahNumber] }),
+        queryClient.invalidateQueries({ queryKey: ['annotations', surahNumber] }),
         queryClient.invalidateQueries({ queryKey: ['annotated-ayahs'] }),
       ]);
     },

@@ -26,12 +26,10 @@ function mapAnnotation(row: AnnotationRow): VerseAnnotation {
 
 export async function listAnnotationsForSurah(
   db: SQLiteDatabase,
-  translationId: string,
   surahNumber: number,
 ): Promise<VerseAnnotation[]> {
   const rows = await db.getAllAsync<AnnotationRow>(
-    `SELECT * FROM annotations WHERE translation_id = ? AND surah_number = ? ORDER BY ayah_number`,
-    translationId,
+    `SELECT * FROM annotations WHERE surah_number = ? ORDER BY ayah_number`,
     surahNumber,
   );
   return rows.map(mapAnnotation);
@@ -50,8 +48,7 @@ export async function saveAnnotation(
   const note = input.noteText?.trim() || null;
   if (!note && !input.highlightColor) {
     await db.runAsync(
-      'DELETE FROM annotations WHERE translation_id = ? AND surah_number = ? AND ayah_number = ?',
-      input.translationId,
+      'DELETE FROM annotations WHERE surah_number = ? AND ayah_number = ?',
       input.surahNumber,
       input.ayahNumber,
     );
@@ -62,7 +59,7 @@ export async function saveAnnotation(
     `INSERT INTO annotations (
       translation_id, surah_number, ayah_number, note_text, highlight_color, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(translation_id, surah_number, ayah_number) DO UPDATE SET
+    ON CONFLICT(surah_number, ayah_number) DO UPDATE SET
       note_text = excluded.note_text,
       highlight_color = excluded.highlight_color,
       updated_at = excluded.updated_at`,
@@ -73,6 +70,18 @@ export async function saveAnnotation(
     input.highlightColor,
     now,
     now,
+  );
+}
+
+export async function deleteAnnotation(
+  db: SQLiteDatabase,
+  surahNumber: number,
+  ayahNumber: number,
+): Promise<void> {
+  await db.runAsync(
+    'DELETE FROM annotations WHERE surah_number = ? AND ayah_number = ?',
+    surahNumber,
+    ayahNumber,
   );
 }
 

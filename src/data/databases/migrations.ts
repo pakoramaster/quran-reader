@@ -2,7 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { normalizeTranslationText } from '@/features/translations/domain/translationText';
 
-const VERSION = 2;
+const VERSION = 3;
 
 export async function migrateUserDatabase(db: SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
@@ -84,6 +84,72 @@ export async function migrateUserDatabase(db: SQLiteDatabase): Promise<void> {
         await update.finalizeAsync();
       }
       await db.execAsync('PRAGMA user_version = 2;');
+    }
+    if (currentVersion < 3) {
+      await db.execAsync(`
+        UPDATE annotations
+        SET note_text = (
+          SELECT group_concat(merged.note_text, char(10) || char(10) || '---' || char(10) || char(10))
+          FROM (
+            SELECT candidate.note_text
+            FROM annotations AS candidate
+            WHERE candidate.surah_number = annotations.surah_number
+              AND candidate.ayah_number = annotations.ayah_number
+              AND candidate.note_text IS NOT NULL
+            GROUP BY candidate.note_text
+            ORDER BY MAX(candidate.updated_at) DESC,
+              MAX(candidate.created_at) DESC,
+              MAX(candidate.translation_id) DESC
+          ) AS merged
+        )
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM annotations AS newer
+          WHERE newer.surah_number = annotations.surah_number
+            AND newer.ayah_number = annotations.ayah_number
+            AND (
+              newer.updated_at > annotations.updated_at
+              OR (
+                newer.updated_at = annotations.updated_at
+                AND newer.created_at > annotations.created_at
+              )
+              OR (
+                newer.updated_at = annotations.updated_at
+                AND newer.created_at = annotations.created_at
+                AND newer.translation_id > annotations.translation_id
+              )
+            )
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM annotations AS noted
+          WHERE noted.surah_number = annotations.surah_number
+            AND noted.ayah_number = annotations.ayah_number
+            AND noted.note_text IS NOT NULL
+        );
+        DELETE FROM annotations
+        WHERE EXISTS (
+          SELECT 1
+          FROM annotations AS newer
+          WHERE newer.surah_number = annotations.surah_number
+            AND newer.ayah_number = annotations.ayah_number
+            AND (
+              newer.updated_at > annotations.updated_at
+              OR (
+                newer.updated_at = annotations.updated_at
+                AND newer.created_at > annotations.created_at
+              )
+              OR (
+                newer.updated_at = annotations.updated_at
+                AND newer.created_at = annotations.created_at
+                AND newer.translation_id > annotations.translation_id
+              )
+            )
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS annotations_verse
+          ON annotations(surah_number, ayah_number);
+        PRAGMA user_version = 3;
+      `);
     }
   });
 }
