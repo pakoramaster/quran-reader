@@ -35,7 +35,8 @@ async function openWindow() {
   });
 
   if (!app.isPackaged && (process.env.QURAN_FOLIO_SMOKE_TEST === '1'
-    || process.env.QURAN_FOLIO_INPUT_SMOKE_TEST === '1')) {
+    || process.env.QURAN_FOLIO_INPUT_SMOKE_TEST === '1'
+    || process.env.QURAN_FOLIO_AUDIO_SMOKE_TEST === '1')) {
     const { runRequestedSmokeTest } = require('./testing/smoke.cjs');
     await runRequestedSmokeTest({ app, window });
   }

@@ -34,7 +34,30 @@ async function runApplicationSmokeTest({ app, window }) {
   app.quit();
 }
 
+async function runAudioSmokeTest({ app, window }) {
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  const result = await window.webContents.executeJavaScript(`new Promise((resolve) => {
+    const audio = new Audio();
+    audio.crossOrigin = 'anonymous';
+    const timeout = setTimeout(() => resolve({ loaded: false, error: 'Timed out loading recitation audio.' }), 15000);
+    const finish = (result) => {
+      clearTimeout(timeout);
+      audio.pause();
+      audio.removeAttribute('src');
+      resolve(result);
+    };
+    audio.addEventListener('canplay', () => finish({ loaded: true, error: null }), { once: true });
+    audio.addEventListener('error', () => finish({ loaded: false, error: audio.error?.message ?? 'Media element error.' }), { once: true });
+    audio.src = 'https://everyayah.com/data/Husary_64kbps/001001.mp3';
+    audio.load();
+  })`);
+  console.log(`DESKTOP_AUDIO_SMOKE_TEST ${JSON.stringify(result)}`);
+  process.exitCode = result.loaded ? 0 : 1;
+  app.quit();
+}
+
 function runRequestedSmokeTest(context) {
+  if (process.env.QURAN_FOLIO_AUDIO_SMOKE_TEST === '1') return runAudioSmokeTest(context);
   if (process.env.QURAN_FOLIO_INPUT_SMOKE_TEST === '1') return runInputSmokeTest(context);
   return runApplicationSmokeTest(context);
 }

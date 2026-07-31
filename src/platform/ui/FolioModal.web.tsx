@@ -6,8 +6,10 @@ import type { FolioModalProps } from './FolioModal.types';
 
 const overlayStyle: CSSProperties = {
   backgroundColor: colors.paper,
+  display: 'flex',
+  flexDirection: 'column',
   inset: 0,
-  overflow: 'auto',
+  overflow: 'hidden',
   position: 'fixed',
   zIndex: 1000,
 };

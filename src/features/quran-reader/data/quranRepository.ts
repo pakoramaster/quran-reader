@@ -71,6 +71,26 @@ export async function listAyahsInRange(
   }));
 }
 
+export async function getAyah(
+  db: SQLiteDatabase,
+  surahNumber: number,
+  ayahNumber: number,
+): Promise<QuranAyah | null> {
+  const row = await db.getFirstAsync<AyahRow>(
+    'SELECT * FROM ayahs WHERE surah_number = ? AND ayah_number = ?',
+    surahNumber,
+    ayahNumber,
+  );
+  return row
+    ? {
+        surahNumber: row.surah_number,
+        ayahNumber: row.ayah_number,
+        verseKey: row.verse_key,
+        textUthmani: row.text_uthmani,
+      }
+    : null;
+}
+
 export async function listCanonicalVerseKeys(db: SQLiteDatabase): Promise<VerseKey[]> {
   const rows = await db.getAllAsync<{ verse_key: VerseKey }>('SELECT verse_key FROM ayahs');
   return rows.map((row) => row.verse_key);

@@ -92,11 +92,14 @@ export async function listTranslationVersesInRange(
 }
 
 export async function getActiveTranslationId(db: SQLiteDatabase): Promise<string | null> {
-  const row = await db.getFirstAsync<{ value: string }>(
-    "SELECT value FROM app_settings WHERE key = 'active_translation_id'",
+  const row = await db.getFirstAsync<{ id: string }>(
+    `SELECT t.id
+     FROM app_settings s
+     JOIN translations t ON t.id = s.value
+     WHERE s.key = 'active_translation_id'`,
   );
-  if (row) return row.value;
-  const first = await db.getFirstAsync<{ id: string }>('SELECT id FROM translations ORDER BY imported_at LIMIT 1');
+  if (row) return row.id;
+  const first = await db.getFirstAsync<{ id: string }>('SELECT id FROM translations ORDER BY imported_at, id LIMIT 1');
   return first?.id ?? null;
 }
 
@@ -106,6 +109,51 @@ export async function setActiveTranslationId(db: SQLiteDatabase, id: string): Pr
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     id,
   );
+}
+
+export async function deleteTranslation(db: SQLiteDatabase, translationId: string): Promise<boolean> {
+  let deleted = false;
+  await runAtomicWrite(db, async (transaction) => {
+    const existing = await transaction.getFirstAsync<{ id: string }>(
+      'SELECT id FROM translations WHERE id = ?',
+      translationId,
+    );
+    if (!existing) return;
+
+    const active = await transaction.getFirstAsync<{ id: string }>(
+      `SELECT t.id
+       FROM app_settings s
+       JOIN translations t ON t.id = s.value
+       WHERE s.key = 'active_translation_id'`,
+    );
+    const fallback = await transaction.getFirstAsync<{ id: string }>(
+      `SELECT id FROM translations
+       WHERE id <> ?
+       ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, imported_at, id
+       LIMIT 1`,
+      translationId,
+      active?.id ?? '',
+    );
+
+    if (!active || active.id === translationId) {
+      if (fallback) {
+        await transaction.runAsync(
+          `INSERT INTO app_settings (key, value) VALUES ('active_translation_id', ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+          fallback.id,
+        );
+      } else {
+        await transaction.runAsync("DELETE FROM app_settings WHERE key = 'active_translation_id'");
+      }
+    }
+    // Expo's native exclusive transaction uses another SQLite connection, where
+    // foreign_keys may not inherit the provider connection's PRAGMA setting.
+    await transaction.runAsync('DELETE FROM annotations WHERE translation_id = ?', translationId);
+    await transaction.runAsync('DELETE FROM translation_verses WHERE translation_id = ?', translationId);
+    await transaction.runAsync('DELETE FROM translations WHERE id = ?', translationId);
+    deleted = true;
+  });
+  return deleted;
 }
 
 export async function installTranslation(
