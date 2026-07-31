@@ -62,10 +62,7 @@ export default function TranslationsScreen() {
       {translations.isLoading ? <LoadingFolio label="Reading your library…" /> : null}
       {!translations.isLoading && !translations.data?.length ? (
         <EmptyFolio
-          actionLabel="Choose a JSON file"
           body="Import a complete 6,236-ayah translation to begin annotating and listening offline."
-          glyph="ت"
-          onAction={() => router.push('/translations/import')}
           title="Your shelf is empty"
         />
       ) : null}

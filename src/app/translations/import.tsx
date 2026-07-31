@@ -82,6 +82,7 @@ export default function ImportTranslationScreen() {
         </Pressable>
       }
       eyebrow="Local document import"
+      safeBottom
       subtitle="The file is validated on this device and is never uploaded. Existing translations remain untouched until you confirm."
       title="Import a translation"
     >

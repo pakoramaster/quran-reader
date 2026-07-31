@@ -2,11 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import * as Speech from 'expo-speech';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Easing, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, type ViewToken } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { FolioScreen } from '@/components/FolioScreen';
+import { FolioHeader, FolioScreen } from '@/components/FolioScreen';
 import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { listAyahsInRange, listSurahs } from '@/features/quran-reader/data/quranRepository';
 import { DEFAULT_RECITER_ID, getReciter, isReciterId, RECITERS, type ReciterId } from '@/features/recitation/domain/reciters';
@@ -33,6 +33,9 @@ const keys = {
   volume: 'recitation_volume',
 } as const;
 
+const verseViewabilityConfig = { itemVisiblePercentThreshold: 20 };
+const AnimatedSafeAreaView = Animated.createAnimatedComponent(SafeAreaView);
+
 function bounded(value: string | null, fallback: number, min: number, max: number) {
   if (value === null || value.trim() === '') return fallback;
   const parsed = Number(value);
@@ -52,10 +55,12 @@ export default function RecitationScreen() {
   const userDb = useUserDatabase();
   const speech = useSpeech();
   const verseListRef = useRef<FlatList<PlaybackRow>>(null);
+  const volumeSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [rangePicker, setRangePicker] = useState<'start' | 'end' | null>(null);
   const [selectedVerseKey, setSelectedVerseKey] = useState<VerseKey | null>(null);
   const [followingPlayback, setFollowingPlayback] = useState(true);
+  const [visibleSurahs, setVisibleSurahs] = useState<{ first: number; last: number } | null>(null);
   const [voices, setVoices] = useState<Speech.Voice[]>([]);
   const [reciterOverride, setReciterOverride] = useState<ReciterId | null | undefined>();
   const [translationOverride, setTranslationOverride] = useState<string | null | undefined>();
@@ -64,6 +69,38 @@ export default function RecitationScreen() {
   const [rangeRepeatOverride, setRangeRepeatOverride] = useState<number>();
   const [ayahRepeatOverride, setAyahRepeatOverride] = useState<number>();
   const [volumeOverride, setVolumeOverride] = useState<number>();
+  const [sheetProgress] = useState(() => new Animated.Value(0));
+  const openSettings = useCallback(() => {
+    sheetProgress.setValue(0);
+    setSettingsOpen(true);
+    requestAnimationFrame(() => {
+      Animated.timing(sheetProgress, {
+        duration: 380,
+        easing: Easing.out(Easing.cubic),
+        toValue: 1,
+        useNativeDriver: true,
+      }).start();
+    });
+  }, [sheetProgress]);
+  const closeSettings = useCallback(() => {
+    Animated.timing(sheetProgress, {
+      duration: 280,
+      easing: Easing.inOut(Easing.cubic),
+      toValue: 0,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (!finished) return;
+      setSettingsOpen(false);
+      setRangePicker(null);
+    });
+  }, [sheetProgress]);
+  const sheetAnimatedStyle = {
+    opacity: sheetProgress,
+    transform: [{ translateY: sheetProgress.interpolate({ inputRange: [0, 1], outputRange: [90, 0] }) }],
+  };
+  const backdropAnimatedStyle = {
+    opacity: sheetProgress,
+  };
 
   const surahs = useQuery({ queryKey: ['surahs'], queryFn: () => listSurahs(quranDb), staleTime: Infinity });
   const translations = useQuery({ queryKey: ['translations'], queryFn: () => listTranslations(userDb) });
@@ -83,6 +120,9 @@ export default function RecitationScreen() {
 
   useEffect(() => {
     void Speech.getAvailableVoicesAsync().then(setVoices).catch(() => setVoices([]));
+  }, []);
+  useEffect(() => () => {
+    if (volumeSaveTimerRef.current) clearTimeout(volumeSaveTimerRef.current);
   }, []);
 
   const storedReciter = stored.data?.reciter ?? null;
@@ -125,7 +165,25 @@ export default function RecitationScreen() {
   }, [rangeAyahs.data, rangeTranslation.data]);
   const selectedIndex = Math.max(0, playbackRows.findIndex((verse) => verse.key === selectedVerseKey));
   const currentIndex = playbackRows.findIndex((verse) => verse.key === speech.currentVerseKey);
+  const currentSurahNumber = currentIndex >= 0 ? playbackRows[currentIndex]?.surahNumber ?? null : null;
+  const visibleSurahDistance = currentSurahNumber === null || visibleSurahs === null
+    ? 0
+    : currentSurahNumber < visibleSurahs.first
+      ? visibleSurahs.first - currentSurahNumber
+      : currentSurahNumber > visibleSurahs.last
+        ? currentSurahNumber - visibleSurahs.last
+        : 0;
+  const showFollowPrompt = !followingPlayback
+    && currentIndex >= 0
+    && speech.status !== 'idle'
+    && visibleSurahDistance >= 5;
   const versesLoading = rangeAyahs.isLoading || (Boolean(translation) && rangeTranslation.isLoading);
+  const handleViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken<PlaybackRow>[] }) => {
+    const numbers = viewableItems.flatMap((token) => token.item?.surahNumber ? [token.item.surahNumber] : []);
+    if (!numbers.length) return;
+    const next = { first: Math.min(...numbers), last: Math.max(...numbers) };
+    setVisibleSurahs((current) => current?.first === next.first && current.last === next.last ? current : next);
+  }, []);
 
   useEffect(() => {
     if (!followingPlayback || currentIndex < 0 || speech.status === 'idle') return;
@@ -138,7 +196,8 @@ export default function RecitationScreen() {
     const next = Math.max(0, Math.min(1, value));
     setVolumeOverride(next);
     speech.setVolume(next);
-    persistNumber(keys.volume, next);
+    if (volumeSaveTimerRef.current) clearTimeout(volumeSaveTimerRef.current);
+    volumeSaveTimerRef.current = setTimeout(() => persistNumber(keys.volume, next), 180);
   };
   const selectReciter = (value: ReciterId | null) => {
     stopForChange();
@@ -193,15 +252,47 @@ export default function RecitationScreen() {
     ? `${getReciter(reciterId).name} · ${translation.title}`
     : reciterId ? getReciter(reciterId).name
     : translation?.title ?? 'Choose a reciter or translation';
+  const stopControl = (
+    <Pressable accessibilityLabel="Stop" disabled={speech.status === 'idle'} onPress={() => void speech.stop()} style={[styles.compactControl, speech.status === 'idle' ? styles.disabled : null]}>
+      <Ionicons color={colors.oxblood} name="stop" size={19} />
+    </Pressable>
+  );
+  const playControl = (
+    <Pressable
+      accessibilityLabel={speech.status === 'paused' ? 'Resume' : isActive ? 'Pause' : 'Play'}
+      disabled={!hasSource || versesLoading || !playbackRows.length}
+      onPress={() => speech.status === 'paused' ? void speech.resume() : isActive ? void speech.pause() : void beginPlayback()}
+      style={[styles.compactPlayControl, !hasSource || versesLoading || !playbackRows.length ? styles.disabled : null]}
+    >
+      {versesLoading || speech.status === 'loading'
+        ? <ActivityIndicator color={colors.paperLight} size="small" />
+        : <Ionicons color={colors.paperLight} name={isActive ? 'pause' : 'play'} size={23} />}
+    </Pressable>
+  );
+  const statusControl = (
+    <View style={[styles.controllerStatus, Platform.OS !== 'web' ? styles.controllerStatusMobile : null]}>
+      <Text numberOfLines={1} style={styles.controllerRange}>
+        SURAH {startSurah}–{endSurah}{rangeRepeat > 1 ? ` · RANGE ${speech.status === 'idle' ? 1 : speech.rangeIteration}/${rangeRepeat}` : ''}
+      </Text>
+      <Text numberOfLines={1} style={styles.controllerAyah}>
+        {speech.status !== 'idle' && speech.currentVerseKey
+          ? `Ayah ${speech.currentVerseKey}`
+          : selectedVerseKey ? `Start ${selectedVerseKey}` : 'From the beginning'}
+      </Text>
+    </View>
+  );
+  const volumeControl = <CompactVolumeControl onChange={changeVolume} value={volume} />;
+  const settingsControl = (
+    <Pressable accessibilityLabel="Open settings" onPress={openSettings} style={styles.compactControl}>
+      <Ionicons color={colors.emerald} name="options-outline" size={20} />
+    </Pressable>
+  );
 
   return (
     <>
       <FolioScreen
-        eyebrow="Listen and repeat"
         contentStyle={styles.screen}
         scroll={false}
-        subtitle="Play recitation, translation, or both across a chosen Surah range."
-        title="Recitation"
       >
         <View style={styles.verseListShell}>
           <FlatList
@@ -210,17 +301,22 @@ export default function RecitationScreen() {
             keyExtractor={(item) => item.key}
             ListHeaderComponent={(
               <>
+                <FolioHeader
+                  eyebrow="Listen and repeat"
+                  subtitle="Play recitation, translation, or both across a chosen Surah range."
+                  title="Recitation"
+                />
                 <View style={styles.playerCard}>
           <View style={styles.playerTopline}>
             <View style={styles.playerCopy}>
-              <Text style={styles.sourceLabel} numberOfLines={2}>{sourceLabel}</Text>
+              <Text style={styles.sourceLabel}>{sourceLabel}</Text>
               <Text style={styles.rangeLabel}>Surah {startSurah}–{endSurah} · {rangeRepeat}× range · {ayahRepeat}× each Ayah</Text>
             </View>
             <Ionicons color={hasSource ? colors.gold : colors.inkMuted} name="headset" size={30} />
           </View>
 
           {!hasSource ? (
-            <Pressable onPress={() => setSettingsOpen(true)} style={styles.emptyPrompt}>
+            <Pressable onPress={openSettings} style={styles.emptyPrompt}>
               <Ionicons color={colors.gold} name="information-circle-outline" size={20} />
               <Text style={styles.emptyText}>Open settings and choose at least one audio source.</Text>
             </Pressable>
@@ -228,7 +324,7 @@ export default function RecitationScreen() {
 
                 </View>
                 <View style={styles.verseHeading}>
-                  <View><Text style={styles.verseEyebrow}>PLAYLIST</Text><Text style={styles.verseTitle}>Tap an Ayah to move the playhead</Text></View>
+                  <View style={styles.verseHeadingCopy}><Text style={styles.verseEyebrow}>PLAYLIST</Text><Text style={styles.verseTitle}>Tap an Ayah to move the playhead</Text></View>
                   <Text style={styles.verseCount}>{playbackRows.length} AYAHS</Text>
                 </View>
               </>
@@ -236,6 +332,7 @@ export default function RecitationScreen() {
             ListEmptyComponent={versesLoading ? <ActivityIndicator color={colors.gold} size="large" style={styles.listLoader} /> : null}
             onScrollBeginDrag={() => setFollowingPlayback(false)}
             onScrollToIndexFailed={({ index }) => setTimeout(() => verseListRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.42 }), 250)}
+            onViewableItemsChanged={handleViewableItemsChanged}
             ref={verseListRef}
             renderItem={({ item, index }) => {
               const playing = speech.status !== 'idle' && speech.currentVerseKey === item.key;
@@ -266,37 +363,16 @@ export default function RecitationScreen() {
               );
             }}
             showsVerticalScrollIndicator={false}
+            viewabilityConfig={verseViewabilityConfig}
           />
           <View style={styles.stickyControls}>
-            <Pressable accessibilityLabel="Stop" disabled={speech.status === 'idle'} onPress={() => void speech.stop()} style={[styles.compactControl, speech.status === 'idle' ? styles.disabled : null]}>
-              <Ionicons color={colors.oxblood} name="stop" size={19} />
-            </Pressable>
-            <Pressable
-              accessibilityLabel={speech.status === 'paused' ? 'Resume' : isActive ? 'Pause' : 'Play'}
-              disabled={!hasSource || versesLoading || !playbackRows.length}
-              onPress={() => speech.status === 'paused' ? void speech.resume() : isActive ? void speech.pause() : void beginPlayback()}
-              style={[styles.compactPlayControl, !hasSource || versesLoading || !playbackRows.length ? styles.disabled : null]}
-            >
-              {versesLoading || speech.status === 'loading'
-                ? <ActivityIndicator color={colors.paperLight} size="small" />
-                : <Ionicons color={colors.paperLight} name={isActive ? 'pause' : 'play'} size={23} />}
-            </Pressable>
-            <View style={styles.controllerStatus}>
-              <Text numberOfLines={1} style={styles.controllerRange}>
-                SURAH {startSurah}–{endSurah}{rangeRepeat > 1 ? ` · RANGE ${speech.status === 'idle' ? 1 : speech.rangeIteration}/${rangeRepeat}` : ''}
-              </Text>
-              <Text numberOfLines={1} style={styles.controllerAyah}>
-                {speech.status !== 'idle' && speech.currentVerseKey
-                  ? `Ayah ${speech.currentVerseKey}`
-                  : selectedVerseKey ? `Start ${selectedVerseKey}` : 'From the beginning'}
-              </Text>
-            </View>
-            <CompactVolumeControl onChange={changeVolume} value={volume} />
-            <Pressable accessibilityLabel="Open settings" onPress={() => setSettingsOpen(true)} style={styles.compactControl}>
-              <Ionicons color={colors.emerald} name="options-outline" size={20} />
-            </Pressable>
+            {Platform.OS === 'web' ? (
+              <>{stopControl}{playControl}{statusControl}{volumeControl}{settingsControl}</>
+            ) : (
+              <>{statusControl}<View style={styles.mobileControlRow}>{stopControl}{playControl}{volumeControl}{settingsControl}</View></>
+            )}
           </View>
-          {!followingPlayback && currentIndex >= 0 && speech.status !== 'idle' ? (
+          {showFollowPrompt ? (
             <Pressable
               accessibilityLabel="Follow the currently playing Ayah"
               onPress={() => {
@@ -312,21 +388,45 @@ export default function RecitationScreen() {
         </View>
       </FolioScreen>
 
-      <Modal animationType="slide" onRequestClose={() => setSettingsOpen(false)} statusBarTranslucent transparent visible={settingsOpen}>
+      <Modal animationType="none" onRequestClose={closeSettings} statusBarTranslucent transparent visible={settingsOpen}>
         <View style={styles.modalRoot}>
-          <Pressable accessibilityLabel="Close settings" onPress={() => setSettingsOpen(false)} style={StyleSheet.absoluteFill} />
-          <SafeAreaView edges={['bottom']} style={styles.sheet}>
-            <View style={styles.sheetHandle} />
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.modalBackdrop, backdropAnimatedStyle]} />
+          <AnimatedSafeAreaView edges={['bottom']} style={[styles.sheet, sheetAnimatedStyle]}>
             <View style={styles.sheetHeader}>
               <View>
-                <Text style={styles.sheetEyebrow}>PLAYER PREFERENCES</Text>
-                <Text style={styles.sheetTitle}>Recitation settings</Text>
+                <Text style={styles.sheetEyebrow}>{rangePicker ? 'SURAH RANGE' : 'PLAYER PREFERENCES'}</Text>
+                <Text style={styles.sheetTitle}>{rangePicker ? `Choose ${rangePicker === 'start' ? 'starting' : 'ending'} Surah` : 'Recitation settings'}</Text>
               </View>
-              <Pressable accessibilityLabel="Close settings" onPress={() => setSettingsOpen(false)} style={styles.closeButton}>
-                <Ionicons color={colors.ink} name="close" size={25} />
+              <Pressable accessibilityLabel={rangePicker ? 'Back to settings' : 'Close settings'} onPress={rangePicker ? () => setRangePicker(null) : closeSettings} style={styles.closeButton}>
+                <Ionicons color={colors.ink} name={rangePicker ? 'arrow-back' : 'close'} size={25} />
               </Pressable>
             </View>
-            <ScrollView contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
+            {rangePicker ? (
+              <FlatList
+                contentContainerStyle={styles.pickerList}
+                data={(surahs.data ?? []).filter((surah) => rangePicker !== 'end' || surah.number >= startSurah)}
+                keyExtractor={(item) => String(item.number)}
+                renderItem={({ item }) => {
+                  const selected = item.number === (rangePicker === 'start' ? startSurah : endSurah);
+                  return (
+                    <Pressable
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: selected }}
+                      onPress={() => {
+                        if (rangePicker === 'start') changeStart(item.number); else changeEnd(item.number);
+                        setRangePicker(null);
+                      }}
+                      style={[styles.surahOption, selected ? styles.choiceSelected : null]}
+                    >
+                      <Text style={styles.surahNumber}>{item.number}</Text>
+                      <Text style={styles.surahName}>{item.nameTransliterated}</Text>
+                      <Text style={styles.surahArabic}>{item.nameArabic}</Text>
+                      {selected ? <Ionicons color={colors.emerald} name="checkmark-circle" size={21} /> : null}
+                    </Pressable>
+                  );
+                }}
+              />
+            ) : <ScrollView contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
               <SettingSection title="Reciter">
                 <Choice label="None" onPress={() => selectReciter(null)} selected={!reciterId} />
                 {RECITERS.map((reciter) => <Choice key={reciter.id} label={reciter.name} meta={reciter.style} onPress={() => selectReciter(reciter.id)} selected={reciterId === reciter.id} />)}
@@ -351,45 +451,8 @@ export default function RecitationScreen() {
                 <Stepper label="Range repeat" max={20} min={1} onChange={(next) => { stopForChange(); setRangeRepeatOverride(next); persistNumber(keys.rangeRepeat, next); }} suffix="×" value={rangeRepeat} />
                 <Stepper label="Individual Ayah repeat" max={20} min={1} onChange={(next) => { stopForChange(); setAyahRepeatOverride(next); persistNumber(keys.ayahRepeat, next); }} suffix="×" value={ayahRepeat} />
               </SettingSection>
-            </ScrollView>
-          </SafeAreaView>
-        </View>
-      </Modal>
-
-      <Modal animationType="slide" onRequestClose={() => setRangePicker(null)} transparent visible={rangePicker !== null}>
-        <View style={styles.modalRoot}>
-          <Pressable accessibilityLabel="Close Surah picker" onPress={() => setRangePicker(null)} style={StyleSheet.absoluteFill} />
-          <SafeAreaView edges={['bottom']} style={[styles.sheet, styles.pickerSheet]}>
-            <View style={styles.sheetHandle} />
-            <View style={styles.sheetHeader}>
-              <View><Text style={styles.sheetEyebrow}>SURAH RANGE</Text><Text style={styles.sheetTitle}>Choose {rangePicker === 'start' ? 'starting' : 'ending'} Surah</Text></View>
-              <Pressable accessibilityLabel="Close Surah picker" onPress={() => setRangePicker(null)} style={styles.closeButton}><Ionicons color={colors.ink} name="close" size={25} /></Pressable>
-            </View>
-            <FlatList
-              contentContainerStyle={styles.pickerList}
-              data={(surahs.data ?? []).filter((surah) => rangePicker !== 'end' || surah.number >= startSurah)}
-              keyExtractor={(item) => String(item.number)}
-              renderItem={({ item }) => {
-                const selected = item.number === (rangePicker === 'start' ? startSurah : endSurah);
-                return (
-                  <Pressable
-                    accessibilityRole="radio"
-                    accessibilityState={{ checked: selected }}
-                    onPress={() => {
-                      if (rangePicker === 'start') changeStart(item.number); else changeEnd(item.number);
-                      setRangePicker(null);
-                    }}
-                    style={[styles.surahOption, selected ? styles.choiceSelected : null]}
-                  >
-                    <Text style={styles.surahNumber}>{item.number}</Text>
-                    <Text style={styles.surahName}>{item.nameTransliterated}</Text>
-                    <Text style={styles.surahArabic}>{item.nameArabic}</Text>
-                    {selected ? <Ionicons color={colors.emerald} name="checkmark-circle" size={21} /> : null}
-                  </Pressable>
-                );
-              }}
-            />
-          </SafeAreaView>
+            </ScrollView>}
+          </AnimatedSafeAreaView>
         </View>
       </Modal>
     </>
@@ -442,10 +505,18 @@ const styles = StyleSheet.create({
   emptyText: { color: colors.paperLight, flex: 1, fontFamily: fontFamilies.body, fontSize: 15 },
   disabled: { opacity: 0.35 },
   verseListShell: { flex: 1, position: 'relative' },
-  verseList: { paddingBottom: 118 },
-  verseHeading: { alignItems: 'flex-end', flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, marginTop: 4 },
+  verseList: { paddingBottom: Platform.OS === 'web' ? 118 : 158 },
+  verseHeading: {
+    alignItems: Platform.OS === 'web' ? 'flex-end' : 'flex-start',
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: Platform.OS === 'web' ? 0 : 4,
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    marginTop: 4,
+  },
   verseEyebrow: { color: colors.gold, fontFamily: fontFamilies.bodyBold, fontSize: 10, letterSpacing: 1.4 },
-  verseTitle: { color: colors.ink, fontFamily: fontFamilies.display, fontSize: 21 },
+  verseHeadingCopy: { flexShrink: 1, maxWidth: '100%' },
+  verseTitle: { color: colors.ink, flexShrink: 1, fontFamily: fontFamilies.display, fontSize: 21 },
   verseCount: { color: colors.inkMuted, fontFamily: fontFamilies.bodyBold, fontSize: 10, letterSpacing: 1.1, paddingBottom: 3 },
   listLoader: { marginTop: 36 },
   surahDivider: { color: colors.gold, fontFamily: fontFamilies.bodyBold, fontSize: 11, letterSpacing: 1.4, marginBottom: 8, marginTop: 10 },
@@ -463,23 +534,24 @@ const styles = StyleSheet.create({
   verseNumber: { color: colors.gold, fontFamily: fontFamilies.arabic, fontSize: 20 },
   verseRule: { backgroundColor: colors.gold, height: 1, marginVertical: 12, opacity: 0.45, width: 30 },
   verseTranslation: { color: colors.ink, fontFamily: fontFamilies.body, fontSize: 18, lineHeight: 25 },
-  stickyControls: { alignItems: 'center', alignSelf: 'center', backgroundColor: colors.paperLight, borderColor: colors.border, borderRadius: 28, borderWidth: 1, bottom: 10, elevation: 6, flexDirection: 'row', gap: 6, justifyContent: 'center', maxWidth: '94%', minWidth: 320, paddingHorizontal: 10, paddingVertical: 6, position: 'absolute', shadowColor: '#000', shadowOffset: { height: 2, width: 0 }, shadowOpacity: 0.2, shadowRadius: 5, width: 'auto' },
-  compactControl: { alignItems: 'center', borderRadius: 20, height: 40, justifyContent: 'center', width: 42 },
-  compactPlayControl: { alignItems: 'center', backgroundColor: colors.emerald, borderRadius: 22, height: 44, justifyContent: 'center', width: 48 },
-  controllerStatus: { minWidth: 150, paddingHorizontal: 6 },
+  stickyControls: { alignItems: 'center', alignSelf: 'center', backgroundColor: colors.paperLight, borderColor: colors.border, borderRadius: 28, borderWidth: 1, bottom: 10, elevation: 6, flexDirection: Platform.OS === 'web' ? 'row' : 'column', gap: Platform.OS === 'web' ? 4 : 2, justifyContent: 'center', maxWidth: Platform.OS === 'web' ? '96%' : 380, minWidth: Platform.OS === 'web' ? 320 : 280, paddingHorizontal: Platform.OS === 'web' ? 6 : 12, paddingVertical: Platform.OS === 'web' ? 6 : 8, position: 'absolute', shadowColor: '#000', shadowOffset: { height: 2, width: 0 }, shadowOpacity: 0.2, shadowRadius: 5, width: Platform.OS === 'web' ? 'auto' : '94%' },
+  compactControl: { alignItems: 'center', borderRadius: 18, height: 38, justifyContent: 'center', width: 34 },
+  compactPlayControl: { alignItems: 'center', backgroundColor: colors.emerald, borderRadius: 22, height: 44, justifyContent: 'center', width: 44 },
+  controllerStatus: { flexShrink: 1, minWidth: 110, paddingHorizontal: 4 },
+  controllerStatusMobile: { alignItems: 'flex-start', minWidth: 0, paddingHorizontal: 12, width: '100%' },
+  mobileControlRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-around', width: '100%' },
   controllerRange: { color: colors.gold, fontFamily: fontFamilies.bodyBold, fontSize: 9, letterSpacing: 0.9 },
   controllerAyah: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 13, marginTop: 1 },
-  followButton: { alignItems: 'center', alignSelf: 'center', backgroundColor: colors.emerald, borderRadius: 22, bottom: 70, elevation: 4, flexDirection: 'row', gap: 7, paddingHorizontal: 16, paddingVertical: 10, position: 'absolute', shadowColor: '#000', shadowOffset: { height: 2, width: 0 }, shadowOpacity: 0.22, shadowRadius: 4 },
+  followButton: { alignItems: 'center', alignSelf: 'center', backgroundColor: colors.emerald, borderRadius: 22, bottom: Platform.OS === 'web' ? 70 : 112, elevation: 4, flexDirection: 'row', gap: 7, paddingHorizontal: 16, paddingVertical: 10, position: 'absolute', shadowColor: '#000', shadowOffset: { height: 2, width: 0 }, shadowOpacity: 0.22, shadowRadius: 4 },
   followText: { color: colors.paperLight, fontFamily: fontFamilies.bodyBold, fontSize: 14 },
-  modalRoot: { backgroundColor: 'rgba(12,24,20,0.5)', flex: 1, justifyContent: 'flex-end' },
+  modalRoot: { backgroundColor: 'transparent', flex: 1, justifyContent: 'flex-end' },
+  modalBackdrop: { backgroundColor: 'rgba(12,24,20,0.5)' },
   sheet: { alignSelf: 'center', backgroundColor: colors.paper, borderTopLeftRadius: 18, borderTopRightRadius: 18, maxHeight: '91%', maxWidth: 760, overflow: 'hidden', width: '100%' },
-  sheetHandle: { alignSelf: 'center', backgroundColor: colors.border, borderRadius: 2, height: 4, marginTop: 9, width: 44 },
   sheetHeader: { alignItems: 'center', borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 22, paddingVertical: 14 },
   sheetEyebrow: { color: colors.gold, fontFamily: fontFamilies.bodyBold, fontSize: 10, letterSpacing: 1.5 },
   sheetTitle: { color: colors.ink, fontFamily: fontFamilies.display, fontSize: 25 },
   closeButton: { alignItems: 'center', height: 42, justifyContent: 'center', width: 42 },
   sheetContent: { padding: 18, paddingBottom: 36 },
-  pickerSheet: { height: '78%' },
   pickerList: { padding: 18, paddingBottom: 36 },
   section: { backgroundColor: colors.paperLight, borderColor: colors.border, borderRadius: 3, borderWidth: 1, marginBottom: 14, padding: 15 },
   sectionTitle: { color: colors.ink, fontFamily: fontFamilies.display, fontSize: 21, marginBottom: 8 },

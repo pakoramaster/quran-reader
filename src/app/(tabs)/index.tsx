@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { FolioScreen } from '@/components/FolioScreen';
+import { FolioHeader, FolioScreen } from '@/components/FolioScreen';
 import { LoadingFolio } from '@/components/LoadingFolio';
 import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { listSurahs } from '@/features/quran-reader/data/quranRepository';
@@ -48,35 +48,38 @@ export default function QuranIndexScreen() {
   return (
     <FolioScreen
       contentStyle={styles.screen}
-      eyebrow="Private · Offline · Verbatim"
       scroll={false}
-      subtitle="The verified Arabic text remains untouched. Your translations and reflections stay on this device."
-      title="Quran Folio"
     >
-      <View style={styles.activeStrip}>
-        <Ionicons color={colors.gold} name="language-outline" size={19} />
-        <View style={styles.activeCopy}>
-          <Text style={styles.activeLabel}>ACTIVE TRANSLATION</Text>
-          <Text style={styles.activeValue}>
-            {activeTranslation.data?.title ?? 'No translation imported yet'}
-          </Text>
-        </View>
-        <Pressable accessibilityRole="button" onPress={() => router.push('/translations')}>
-          <Text style={styles.manage}>MANAGE</Text>
-        </Pressable>
-      </View>
-      {surahs.isLoading ? (
-        <LoadingFolio label="Opening the Surahs…" />
-      ) : (
-        <FlatList
-          contentContainerStyle={styles.list}
-          data={surahs.data ?? []}
-          initialNumToRender={14}
-          keyExtractor={(item) => String(item.number)}
-          renderItem={({ item }) => <SurahRow surah={item} />}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
+      <FlatList
+        contentContainerStyle={styles.list}
+        data={surahs.data ?? []}
+        initialNumToRender={14}
+        keyExtractor={(item) => String(item.number)}
+        ListEmptyComponent={surahs.isLoading ? <LoadingFolio label="Opening the Surahs…" /> : null}
+        ListHeaderComponent={(
+          <>
+            <FolioHeader
+              eyebrow="Private · Offline · Verbatim"
+              subtitle="The verified Arabic text remains untouched. Your translations and reflections stay on this device."
+              title="Quran Folio"
+            />
+            <View style={styles.activeStrip}>
+              <Ionicons color={colors.gold} name="language-outline" size={19} />
+              <View style={styles.activeCopy}>
+                <Text style={styles.activeLabel}>ACTIVE TRANSLATION</Text>
+                <Text style={styles.activeValue}>
+                  {activeTranslation.data?.title ?? 'No translation imported yet'}
+                </Text>
+              </View>
+              <Pressable accessibilityRole="button" onPress={() => router.push('/translations')}>
+                <Text style={styles.manage}>MANAGE</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
+        renderItem={({ item }) => <SurahRow surah={item} />}
+        showsVerticalScrollIndicator={false}
+      />
     </FolioScreen>
   );
 }
