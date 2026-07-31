@@ -11,10 +11,15 @@ import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { getQuranMetadata } from '@/features/quran-reader/data/quranRepository';
 import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
+import {
+  DEFAULT_VOICE_PROFILE_ID,
+  getVoiceProfile,
+  isVoiceProfileId,
+  resolveVoiceForProfile,
+  VOICE_PROFILES,
+} from '@/features/speech/domain/voiceProfiles';
 import { getActiveTranslationId, getTranslation } from '@/features/translations/data/translationRepository';
 import { colors, fontFamilies, spacing } from '@/theme/tokens';
-
-const rates = [0.75, 0.9, 1.1];
 
 export default function SettingsScreen() {
   const quranDb = useSQLiteContext();
@@ -33,8 +38,7 @@ export default function SettingsScreen() {
   const speechSettings = useQuery({
     queryKey: ['speech-settings', activeTranslation.data?.language],
     queryFn: async () => ({
-      voice: await getSetting(userDb, `tts_voice_${activeTranslation.data!.language}`),
-      rate: Number(await getSetting(userDb, 'tts_rate')) || 0.9,
+      profile: await getSetting(userDb, 'tts_voice_profile'),
     }),
     enabled: Boolean(activeTranslation.data?.language),
   });
@@ -46,64 +50,58 @@ export default function SettingsScreen() {
   useEffect(() => {
     void Speech.getAvailableVoicesAsync().then(setVoices).catch(() => setVoices([]));
   }, []);
-  const matchingVoices = useMemo(() => {
-    const language = activeTranslation.data?.language.toLowerCase();
-    if (!language) return [];
-    const base = language.split('-')[0];
-    return voices.filter((voice) => voice.language.toLowerCase().startsWith(base ?? language));
-  }, [activeTranslation.data?.language, voices]);
+  const selectedProfileId = isVoiceProfileId(speechSettings.data?.profile)
+    ? speechSettings.data.profile
+    : DEFAULT_VOICE_PROFILE_ID;
+  const selectedProfile = getVoiceProfile(selectedProfileId);
+  const resolvedVoice = useMemo(
+    () => activeTranslation.data
+      ? resolveVoiceForProfile(voices, activeTranslation.data.language, selectedProfileId)
+      : undefined,
+    [activeTranslation.data, selectedProfileId, voices],
+  );
 
   return (
     <FolioScreen
       eyebrow="Reading room preferences"
-      subtitle="Translation voices come from the operating system. Qur’an recitations stream on demand; reading, translations, and notes remain local."
+      subtitle="Four consistent voice profiles keep translation playback familiar across the app. Qur’an recitations stream on demand."
       title="Settings"
     >
       <Section icon="volume-medium-outline" title="Read aloud">
         {activeTranslation.data ? (
           <>
-            <Text style={styles.copy}>Voice for {activeTranslation.data.title} ({activeTranslation.data.language})</Text>
-            {matchingVoices.length ? matchingVoices.slice(0, 8).map((voice) => {
-              const selected = speechSettings.data?.voice === voice.identifier;
+            <Text style={styles.copy}>Voice profile for {activeTranslation.data.title} ({activeTranslation.data.language})</Text>
+            {VOICE_PROFILES.map((profile) => {
+              const selected = selectedProfileId === profile.id;
               return (
                 <Pressable
-                  key={voice.identifier}
-                  onPress={() => save.mutate({ key: `tts_voice_${activeTranslation.data!.language}`, value: voice.identifier })}
+                  key={profile.id}
+                  onPress={() => save.mutate({ key: 'tts_voice_profile', value: profile.id })}
                   style={[styles.optionRow, selected ? styles.optionSelected : null]}
                 >
                   <View style={styles.optionCopy}>
-                    <Text style={styles.optionTitle}>{voice.name}</Text>
-                    <Text style={styles.optionMeta}>{voice.language} · {voice.quality}</Text>
+                    <Text style={styles.optionTitle}>{profile.name}</Text>
+                    <Text style={styles.optionMeta}>{profile.description}</Text>
                   </View>
                   {selected ? <Ionicons color={colors.emerald} name="checkmark-circle" size={21} /> : null}
                 </Pressable>
               );
-            }) : <Text style={styles.warning}>No matching voice is installed. Add a {activeTranslation.data.language} voice in your device accessibility or speech settings.</Text>}
-            <Text style={styles.label}>SPEECH RATE</Text>
-            <View style={styles.rateRow}>
-              {rates.map((rate) => (
-                <Pressable
-                  key={rate}
-                  onPress={() => save.mutate({ key: 'tts_rate', value: String(rate) })}
-                  style={[styles.rateChip, speechSettings.data?.rate === rate ? styles.rateChipActive : null]}
-                >
-                  <Text style={[styles.rateText, speechSettings.data?.rate === rate ? styles.rateTextActive : null]}>{rate}×</Text>
-                </Pressable>
-              ))}
-            </View>
+            })}
+            {!resolvedVoice ? <Text style={styles.warning}>No {activeTranslation.data.language} speech voice is installed. Add one in your device speech settings to hear this translation.</Text> : null}
             <FolioButton
               label="Test current voice"
               onPress={() => speech.speakAyah(
                 { key: '1:1', text: 'This translation is ready for offline reading.' },
                 activeTranslation.data!.language,
-                speechSettings.data?.voice ?? undefined,
-                speechSettings.data?.rate,
+                resolvedVoice?.identifier,
+                selectedProfile.rate,
+                selectedProfile.pitch,
               )}
               style={styles.testButton}
               variant="secondary"
             />
             <Text style={styles.footnote}>
-              {Platform.OS === 'android'
+              Voice profile names and pacing are uniform across platforms; the exact timbre depends on the offline speech engine installed on the device. {Platform.OS === 'android'
                 ? 'On Android, pause stops speech and resume restarts the current Ayah.'
                 : 'On iPhone, speech may be silent when the hardware silent switch is enabled.'}
             </Text>
@@ -151,12 +149,6 @@ const styles = StyleSheet.create({
   optionTitle: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 16 },
   optionMeta: { color: colors.inkMuted, fontFamily: fontFamilies.body, fontSize: 14 },
   warning: { backgroundColor: '#F4E5D1', color: colors.oxblood, fontFamily: fontFamilies.body, fontSize: 16, lineHeight: 21, marginTop: 12, padding: 12 },
-  label: { color: colors.inkMuted, fontFamily: fontFamilies.bodyBold, fontSize: 10, letterSpacing: 1.4, marginTop: 18 },
-  rateRow: { flexDirection: 'row', gap: 9, marginTop: 8 },
-  rateChip: { alignItems: 'center', borderColor: colors.border, borderRadius: 2, borderWidth: 1, minWidth: 62, padding: 9 },
-  rateChipActive: { backgroundColor: colors.emerald, borderColor: colors.emerald },
-  rateText: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 15 },
-  rateTextActive: { color: colors.paperLight },
   testButton: { marginTop: 16 },
   footnote: { color: colors.inkMuted, fontFamily: fontFamilies.displayItalic, fontSize: 15, lineHeight: 20, marginTop: 12 },
   info: { borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 9 },

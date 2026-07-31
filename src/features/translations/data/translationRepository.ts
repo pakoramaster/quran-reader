@@ -74,6 +74,23 @@ export async function listTranslationVerses(
   return rows.map((row) => ({ key: row.verse_key, text: normalizeTranslationText(row.original_text) }));
 }
 
+export async function listTranslationVersesInRange(
+  db: SQLiteDatabase,
+  translationId: string,
+  startSurah: number,
+  endSurah: number,
+): Promise<TranslationVerse[]> {
+  const rows = await db.getAllAsync<{ verse_key: TranslationVerse['key']; original_text: string }>(
+    `SELECT verse_key, original_text FROM translation_verses
+     WHERE translation_id = ? AND surah_number BETWEEN ? AND ?
+     ORDER BY surah_number, ayah_number`,
+    translationId,
+    startSurah,
+    endSurah,
+  );
+  return rows.map((row) => ({ key: row.verse_key, text: normalizeTranslationText(row.original_text) }));
+}
+
 export async function getActiveTranslationId(db: SQLiteDatabase): Promise<string | null> {
   const row = await db.getFirstAsync<{ value: string }>(
     "SELECT value FROM app_settings WHERE key = 'active_translation_id'",

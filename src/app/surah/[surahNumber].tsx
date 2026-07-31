@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
+import * as Speech from 'expo-speech';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,6 +16,7 @@ import { getSurah, listAyahs } from '@/features/quran-reader/data/quranRepositor
 import { DEFAULT_RECITER_ID, getReciter, isReciterId, RECITERS, type PlaybackMode, type ReciterId } from '@/features/recitation/domain/reciters';
 import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
+import { DEFAULT_VOICE_PROFILE_ID, getVoiceProfile, isVoiceProfileId, resolveVoiceForProfile } from '@/features/speech/domain/voiceProfiles';
 import {
   getActiveTranslationId,
   getTranslation,
@@ -37,6 +39,11 @@ export default function SurahReaderScreen() {
   const [spokenAyahNumber, setSpokenAyahNumber] = useState<number | null>(null);
   const [playbackModeOverride, setPlaybackModeOverride] = useState<PlaybackMode | null>(null);
   const [reciterIdOverride, setReciterIdOverride] = useState<ReciterId | null>(null);
+  const [voices, setVoices] = useState<Speech.Voice[]>([]);
+
+  useEffect(() => {
+    void Speech.getAvailableVoicesAsync().then(setVoices).catch(() => setVoices([]));
+  }, []);
 
   const surah = useQuery({
     queryKey: ['surah', surahNumber],
@@ -65,8 +72,7 @@ export default function SurahReaderScreen() {
   const speechSettings = useQuery({
     queryKey: ['speech-settings', activeTranslation.data?.language],
     queryFn: async () => ({
-      voice: await getSetting(userDb, `tts_voice_${activeTranslation.data!.language}`),
-      rate: Number(await getSetting(userDb, 'tts_rate')) || 0.9,
+      profile: await getSetting(userDb, 'tts_voice_profile'),
     }),
     enabled: Boolean(activeTranslation.data?.language),
   });
@@ -79,6 +85,11 @@ export default function SurahReaderScreen() {
     ?? (storedMode === 'recitation' || ((storedMode === 'translation' || storedMode === 'both') && activeTranslation.data) ? storedMode : 'recitation');
   const storedReciter = playbackSettings.data?.reciter ?? null;
   const reciterId = reciterIdOverride ?? (isReciterId(storedReciter) ? storedReciter : DEFAULT_RECITER_ID);
+  const voiceProfileId = isVoiceProfileId(speechSettings.data?.profile) ? speechSettings.data.profile : DEFAULT_VOICE_PROFILE_ID;
+  const voiceProfile = getVoiceProfile(voiceProfileId);
+  const translationVoice = activeTranslation.data
+    ? resolveVoiceForProfile(voices, activeTranslation.data.language, voiceProfileId)
+    : undefined;
   const annotations = useQuery({
     queryKey: ['annotations', activeTranslation.data?.id, surahNumber],
     queryFn: () => listAnnotationsForSurah(userDb, activeTranslation.data!.id, surahNumber),
@@ -159,8 +170,9 @@ export default function SurahReaderScreen() {
       playbackMode,
       reciterId,
       activeTranslation.data?.language,
-      speechSettings.data?.voice ?? undefined,
-      speechSettings.data?.rate,
+      translationVoice?.identifier,
+      voiceProfile.rate,
+      voiceProfile.pitch,
     );
   };
 
@@ -292,8 +304,9 @@ export default function SurahReaderScreen() {
                         playbackMode,
                         reciterId,
                         activeTranslation.data?.language,
-                        speechSettings.data?.voice ?? undefined,
-                        speechSettings.data?.rate,
+                        translationVoice?.identifier,
+                        voiceProfile.rate,
+                        voiceProfile.pitch,
                       );
                     }}
                     style={styles.iconButton}

@@ -23,6 +23,8 @@ interface SpeechState {
   currentVerseKey: VerseKey | null;
   phase: PlaybackPhase | null;
   error: string | null;
+  rangeIteration: number;
+  rangeRepeat: number;
 }
 
 interface PlaybackVerse extends TranslationVerse {
@@ -30,13 +32,20 @@ interface PlaybackVerse extends TranslationVerse {
 }
 
 interface SpeechContextValue extends SpeechState {
-  speakAyah: (verse: TranslationVerse, language: string, voice?: string, rate?: number) => void;
-  speakSurah: (verses: TranslationVerse[], language: string, voice?: string, rate?: number) => void;
-  play: (verses: PlaybackVerse[], mode: PlaybackMode, reciterId: ReciterId, language?: string, voice?: string, rate?: number) => void;
+  speakAyah: (verse: TranslationVerse, language: string, voice?: string, rate?: number, pitch?: number, volume?: number) => void;
+  speakSurah: (verses: TranslationVerse[], language: string, voice?: string, rate?: number, pitch?: number, volume?: number) => void;
+  play: (verses: PlaybackVerse[], mode: PlaybackMode, reciterId: ReciterId, language?: string, voice?: string, rate?: number, pitch?: number, volume?: number, repeats?: PlaybackRepeats) => void;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
+  setVolume: (volume: number) => void;
   stop: () => Promise<void>;
   reset: () => Promise<void>;
+}
+
+export interface PlaybackRepeats {
+  range: number;
+  ayah: number;
+  startAt?: number;
 }
 
 interface QueueConfig {
@@ -46,10 +55,24 @@ interface QueueConfig {
   language: string;
   voice?: string;
   rate: number;
+  pitch: number;
+  volume: number;
+  repeats: PlaybackRepeats;
 }
 
-const initialState: SpeechState = { status: 'idle', currentVerseKey: null, phase: null, error: null };
+const initialState: SpeechState = {
+  status: 'idle',
+  currentVerseKey: null,
+  phase: null,
+  error: null,
+  rangeIteration: 1,
+  rangeRepeat: 1,
+};
 const SpeechContext = createContext<SpeechContextValue | null>(null);
+
+function setPlayerVolume(player: { volume: number }, volume: number) {
+  player.volume = volume;
+}
 
 export function SpeechProvider({ children }: PropsWithChildren) {
   const [state, setState] = useState<SpeechState>(initialState);
@@ -58,6 +81,8 @@ export function SpeechProvider({ children }: PropsWithChildren) {
   const queueRef = useRef<QueueConfig | null>(null);
   const indexRef = useRef(0);
   const phaseRef = useRef<PlaybackPhase | null>(null);
+  const ayahRunRef = useRef(1);
+  const rangeRunRef = useRef(1);
   const sessionRef = useRef(0);
   const advanceRef = useRef<(session: number) => void>(() => undefined);
 
@@ -66,7 +91,14 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     const verse = queue?.verses[index];
     if (!queue || !verse || session !== sessionRef.current) return;
     phaseRef.current = 'translation';
-    setState({ status: 'speaking', currentVerseKey: verse.key, phase: 'translation', error: null });
+    setState({
+      status: 'speaking',
+      currentVerseKey: verse.key,
+      phase: 'translation',
+      error: null,
+      rangeIteration: rangeRunRef.current,
+      rangeRepeat: queue.repeats.range,
+    });
     const chunks: string[] = [];
     for (let cursor = 0; cursor < verse.text.length; cursor += Speech.maxSpeechInputLength) {
       chunks.push(verse.text.slice(cursor, cursor + Speech.maxSpeechInputLength));
@@ -83,9 +115,18 @@ export function SpeechProvider({ children }: PropsWithChildren) {
         language: queue.language,
         voice: queue.voice,
         rate: queue.rate,
+        pitch: queue.pitch,
+        volume: queue.volume,
         onDone: () => { chunkIndex += 1; speakChunk(); },
         onError: (error) => {
-          if (session === sessionRef.current) setState({ status: 'error', currentVerseKey: verse.key, phase: 'translation', error: error.message || 'Translation speech failed.' });
+          if (session === sessionRef.current) setState({
+            status: 'error',
+            currentVerseKey: verse.key,
+            phase: 'translation',
+            error: error.message || 'Translation speech failed.',
+            rangeIteration: rangeRunRef.current,
+            rangeRepeat: queue.repeats.range,
+          });
         },
       });
     };
@@ -97,7 +138,15 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     const verse = queue?.verses[index];
     if (!queue || !verse || session !== sessionRef.current) return;
     phaseRef.current = 'recitation';
-    setState({ status: 'loading', currentVerseKey: verse.key, phase: 'recitation', error: null });
+    setState({
+      status: 'loading',
+      currentVerseKey: verse.key,
+      phase: 'recitation',
+      error: null,
+      rangeIteration: rangeRunRef.current,
+      rangeRepeat: queue.repeats.range,
+    });
+    setPlayerVolume(player, queue.volume);
     player.replace({ uri: getRecitationUrl(queue.reciterId, verse.key), name: verse.key });
     player.play();
   }, [player]);
@@ -107,7 +156,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     const verse = queue?.verses[index];
     if (!queue || !verse || session !== sessionRef.current) {
       phaseRef.current = null;
-      setState((current) => ({ status: 'idle', currentVerseKey: current.currentVerseKey, phase: null, error: null }));
+      setState((current) => ({ ...current, status: 'idle', phase: null, error: null }));
       return;
     }
     indexRef.current = index;
@@ -120,8 +169,18 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     if (!queue || session !== sessionRef.current) return;
     if (queue.mode === 'both' && phaseRef.current === 'recitation') {
       beginTranslation(indexRef.current, session);
-    } else {
+    } else if (ayahRunRef.current < queue.repeats.ayah) {
+      ayahRunRef.current += 1;
+      beginAt(indexRef.current, session);
+    } else if (indexRef.current + 1 < queue.verses.length) {
+      ayahRunRef.current = 1;
       beginAt(indexRef.current + 1, session);
+    } else if (rangeRunRef.current < queue.repeats.range) {
+      rangeRunRef.current += 1;
+      ayahRunRef.current = 1;
+      beginAt(0, session);
+    } else {
+      beginAt(queue.verses.length, session);
     }
   }, [beginAt, beginTranslation]);
 
@@ -144,21 +203,43 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     void setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'doNotMix', shouldPlayInBackground: true });
   }, []);
 
-  const play = useCallback((verses: PlaybackVerse[], mode: PlaybackMode, reciterId: ReciterId, language = 'en', voice?: string, rate = 0.9) => {
+  const play = useCallback((verses: PlaybackVerse[], mode: PlaybackMode, reciterId: ReciterId, language = 'en', voice?: string, rate = 0.9, pitch = 1, volume = 1, repeats: PlaybackRepeats = { range: 1, ayah: 1 }) => {
     sessionRef.current += 1;
     player.pause();
     void Speech.stop();
-    queueRef.current = { verses, mode, reciterId, language, voice, rate };
-    indexRef.current = 0;
-    beginAt(0, sessionRef.current);
+    queueRef.current = {
+      verses,
+      mode,
+      reciterId,
+      language,
+      voice,
+      rate,
+      pitch,
+      volume: Math.max(0, Math.min(1, volume)),
+      repeats: {
+        range: Math.max(1, repeats.range),
+        ayah: Math.max(1, repeats.ayah),
+        startAt: Math.max(0, Math.min(verses.length - 1, repeats.startAt ?? 0)),
+      },
+    };
+    indexRef.current = queueRef.current.repeats.startAt ?? 0;
+    ayahRunRef.current = 1;
+    rangeRunRef.current = 1;
+    beginAt(indexRef.current, sessionRef.current);
   }, [beginAt, player]);
 
-  const speakSurah = useCallback((verses: TranslationVerse[], language: string, voice?: string, rate?: number) => {
-    play(verses, 'translation', 'husary', language, voice, rate);
+  const speakSurah = useCallback((verses: TranslationVerse[], language: string, voice?: string, rate?: number, pitch?: number, volume?: number) => {
+    play(verses, 'translation', 'husary', language, voice, rate, pitch, volume);
   }, [play]);
-  const speakAyah = useCallback((verse: TranslationVerse, language: string, voice?: string, rate?: number) => {
-    play([verse], 'translation', 'husary', language, voice, rate);
+  const speakAyah = useCallback((verse: TranslationVerse, language: string, voice?: string, rate?: number, pitch?: number, volume?: number) => {
+    play([verse], 'translation', 'husary', language, voice, rate, pitch, volume);
   }, [play]);
+
+  const setVolume = useCallback((volume: number) => {
+    const next = Math.max(0, Math.min(1, volume));
+    if (queueRef.current) queueRef.current = { ...queueRef.current, volume: next };
+    setPlayerVolume(player, next);
+  }, [player]);
 
   const stop = useCallback(async () => {
     sessionRef.current += 1;
@@ -166,7 +247,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     phaseRef.current = null;
     player.pause();
     await Speech.stop();
-    setState((current) => ({ status: 'idle', currentVerseKey: current.currentVerseKey, phase: null, error: null }));
+    setState((current) => ({ ...current, status: 'idle', phase: null, error: null }));
   }, [player]);
   const reset = useCallback(async () => { await stop(); indexRef.current = 0; setState(initialState); }, [stop]);
 
@@ -187,7 +268,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
 
   useEffect(() => () => { player.pause(); void Speech.stop(); }, [player]);
 
-  const value = useMemo(() => ({ ...state, speakAyah, speakSurah, play, pause, resume, stop, reset }), [pause, play, reset, resume, speakAyah, speakSurah, state, stop]);
+  const value = useMemo(() => ({ ...state, speakAyah, speakSurah, play, pause, resume, setVolume, stop, reset }), [pause, play, reset, resume, setVolume, speakAyah, speakSurah, state, stop]);
   return <SpeechContext.Provider value={value}>{children}</SpeechContext.Provider>;
 }
 
