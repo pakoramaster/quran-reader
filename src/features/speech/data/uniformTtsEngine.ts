@@ -13,8 +13,9 @@ import { getVoiceProfile, type VoiceProfileId } from '@/features/speech/domain/v
 import { clampTtsSpeed } from '@/features/speech/domain/ttsSpeeds';
 import { prepareTtsChunks } from '@/features/speech/domain/ttsText';
 
-export const UNIFORM_TTS_MODEL_ID = 'kitten-nano-en-v0_1-fp16';
+export const UNIFORM_TTS_MODEL_ID = 'kokoro-int8-en-v0_19';
 let enginePromise: Promise<TtsEngine> | null = null;
+let engineInstance: TtsEngine | null = null;
 let outputCounter = 0;
 
 export interface UniformVoiceProgress {
@@ -35,13 +36,16 @@ export async function ensureUniformVoiceModel(onProgress?: (progress: UniformVoi
 }
 
 async function engine(): Promise<TtsEngine> {
+  if (engineInstance) return engineInstance;
   if (!enginePromise) {
     enginePromise = (async () => {
       const localPath = await getLocalModelPathByCategory(ModelCategory.Tts, UNIFORM_TTS_MODEL_ID)
         ?? await ensureUniformVoiceModel();
-      return createTTS({ modelPath: { type: 'file', path: localPath }, modelType: 'kitten', numThreads: 2 });
+      engineInstance = await createTTS({ modelPath: { type: 'file', path: localPath }, modelType: 'kokoro', numThreads: 4 });
+      return engineInstance;
     })().catch((error) => {
       enginePromise = null;
+      engineInstance = null;
       throw error;
     });
   }

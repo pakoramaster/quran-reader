@@ -1,7 +1,7 @@
 import { getVoiceProfile, type VoiceProfileId } from '@/features/speech/domain/voiceProfiles';
 import { clampTtsSpeed } from '@/features/speech/domain/ttsSpeeds';
 
-export const UNIFORM_TTS_MODEL_ID = 'kitten-nano-en-v0_1-fp16';
+export const UNIFORM_TTS_MODEL_ID = 'kokoro-int8-en-v0_19';
 
 export interface UniformVoiceProgress {
   percent: number;

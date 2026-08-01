@@ -243,7 +243,7 @@ export default function SettingsScreen() {
               variant="secondary"
             />
             <Text style={styles.footnote}>
-              These are fixed speakers from the same KittenTTS model on every supported platform, rather than voices supplied by the operating system. This voice pack currently reads English translations.
+              These are fixed speakers from the same quantized KokoroTTS model on every supported platform, rather than voices supplied by the operating system. This voice pack currently reads English translations.
             </Text>
           </>
         ) : <Text style={styles.copy}>Import a translation before choosing its read-aloud voice.</Text>}

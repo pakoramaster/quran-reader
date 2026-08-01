@@ -8,10 +8,10 @@ export interface VoiceProfile {
 }
 
 export const VOICE_PROFILES: readonly VoiceProfile[] = [
-  { id: 'clear', name: 'Cedar', description: 'Male · balanced and articulate', speakerId: 0 },
-  { id: 'warm', name: 'Pearl', description: 'Female · warm and measured', speakerId: 1 },
-  { id: 'calm', name: 'Reed', description: 'Male · calm and unhurried', speakerId: 2 },
-  { id: 'bright', name: 'Lark', description: 'Female · light and expressive', speakerId: 3 },
+  { id: 'clear', name: 'Male 1', description: '', speakerId: 6 },
+  { id: 'warm', name: 'Male 2', description: '', speakerId: 9 },
+  { id: 'calm', name: 'Female 1', description: '', speakerId: 0 },
+  { id: 'bright', name: 'Female 2', description: '', speakerId: 12 },
 ] as const;
 
 export const DEFAULT_VOICE_PROFILE_ID: VoiceProfileId = 'clear';

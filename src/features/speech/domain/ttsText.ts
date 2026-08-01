@@ -1,4 +1,4 @@
-const DEFAULT_MAX_CHUNK_LENGTH = 220;
+const DEFAULT_MAX_CHUNK_LENGTH = 700;
 const ABBREVIATION_END = /\b(?:dr|mr|mrs|ms|prof|sr|jr|st|vs|etc)\.$/i;
 
 export function normalizeTtsText(text: string): string {
