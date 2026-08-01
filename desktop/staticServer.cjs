@@ -2,6 +2,8 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 
+const standardVoiceSpeakerIds = new Set([0, 6, 8, 9]);
+
 const mimeTypes = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -136,7 +138,7 @@ function createRequestHandler(webRoot, ttsService = null) {
         const speakerId = Number(body?.speakerId);
         const speed = Number(body?.speed);
         if (!text || text.length > 20_000) throw new Error('Translation text must contain between 1 and 20,000 characters.');
-        if (!Number.isInteger(speakerId) || speakerId < 0 || speakerId > 7) throw new Error('The selected standard voice is invalid.');
+        if (!Number.isInteger(speakerId) || !standardVoiceSpeakerIds.has(speakerId)) throw new Error('The selected standard voice is invalid.');
         if (!Number.isFinite(speed) || speed < 0.5 || speed > 2) throw new Error('The selected speech speed is invalid.');
         const wav = await ttsService.synthesize({ text, speakerId, speed });
         send(response, method, 200, {

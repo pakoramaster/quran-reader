@@ -13,15 +13,21 @@ interface ResponseResult {
 
 function request(url: string, method = 'GET', body?: string): Promise<ResponseResult> {
   return new Promise((resolve, reject) => {
-    const outgoing = http.request(url, {
-      headers: body ? { 'Content-Length': Buffer.byteLength(body), 'Content-Type': 'application/json' } : undefined,
-      method,
-    }, (response) => {
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', (chunk) => { body += chunk; });
-      response.on('end', () => resolve({ body, headers: response.headers, status: response.statusCode ?? 0 }));
-    });
+    const outgoing = http.request(
+      url,
+      {
+        headers: body ? { 'Content-Length': Buffer.byteLength(body), 'Content-Type': 'application/json' } : undefined,
+        method,
+      },
+      (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => {
+          body += chunk;
+        });
+        response.on('end', () => resolve({ body, headers: response.headers, status: response.statusCode ?? 0 }));
+      },
+    );
     outgoing.on('error', reject);
     if (body) outgoing.write(body);
     outgoing.end();
@@ -31,14 +37,17 @@ function request(url: string, method = 'GET', body?: string): Promise<ResponseRe
 describe('desktop static server', () => {
   let server: { close: () => void; url: string };
   let voiceReady = false;
+  const synthesize = jest.fn(async () => Buffer.from('RIFFmock'));
 
   beforeAll(async () => {
     server = await startStaticServer({
       port: 0,
       ttsService: {
-        ensureModel: async () => { voiceReady = true; },
+        ensureModel: async () => {
+          voiceReady = true;
+        },
         ready: () => voiceReady,
-        synthesize: async () => Buffer.from('RIFFmock'),
+        synthesize,
       },
       webRoot: path.resolve(__dirname, '../fixtures/desktop-web'),
     });
@@ -78,13 +87,29 @@ describe('desktop static server', () => {
   it('prepares the standard voice model and serves synthesized WAV audio', async () => {
     await expect(request(`${server.url}/api/tts/status`)).resolves.toMatchObject({ body: '{"ready":false}', status: 200 });
     await expect(request(`${server.url}/api/tts/status?ensure=1`)).resolves.toMatchObject({ body: '{"ready":true}', status: 200 });
-    const speech = await request(`${server.url}/api/tts`, 'POST', JSON.stringify({
-      speakerId: 2,
-      speed: 0.9,
-      text: 'A standard voice.',
-    }));
+    const speech = await request(
+      `${server.url}/api/tts`,
+      'POST',
+      JSON.stringify({
+        speakerId: 9,
+        speed: 0.9,
+        text: 'A standard voice.',
+      }),
+    );
     expect(speech.status).toBe(200);
     expect(speech.headers['content-type']).toBe('audio/wav');
     expect(speech.body).toBe('RIFFmock');
+    expect(synthesize).toHaveBeenLastCalledWith({ speakerId: 9, speed: 0.9, text: 'A standard voice.' });
+  });
+
+  it('accepts every configured Windows voice and rejects unknown speakers', async () => {
+    for (const speakerId of [0, 6, 8, 9]) {
+      await expect(request(`${server.url}/api/tts`, 'POST', JSON.stringify({ speakerId, speed: 1, text: 'Voice test.' }))).resolves.toMatchObject({ status: 200 });
+    }
+
+    await expect(request(`${server.url}/api/tts`, 'POST', JSON.stringify({ speakerId: 12, speed: 1, text: 'Voice test.' }))).resolves.toMatchObject({
+      body: 'The selected standard voice is invalid.',
+      status: 400,
+    });
   });
 });
