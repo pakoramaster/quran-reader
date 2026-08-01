@@ -1,21 +1,13 @@
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type PropsWithChildren,
-} from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react';
 
 import { type PlaybackMode, type ReciterId } from '@/features/recitation/domain/reciters';
 import { releaseDownloadedRecitationUri } from '@/features/recitation/data/recitationFileStore';
 import { resolveRecitationPlaybackSource } from '@/features/recitation/data/recitationPlaybackSource';
-import { releaseUniformSpeechUri, synthesizeUniformSpeech } from '@/features/speech/data/uniformTtsEngine';
+import { releaseUniformSpeechUri, synthesizeUniformSpeech, warmUniformVoiceEngine } from '@/features/speech/data/uniformTtsEngine';
 import { getTtsSpeed } from '@/features/speech/domain/ttsSpeeds';
 import { DEFAULT_VOICE_PROFILE_ID, type VoiceProfileId } from '@/features/speech/domain/voiceProfiles';
+import { beginPlaybackSource, createPlaybackCompletionTracker, observePlaybackStatus } from '@/features/speech/domain/playbackCompletion';
 import type { TranslationVerse, VerseKey } from '@/types/domain';
 
 type SpeechStatus = 'idle' | 'speaking' | 'paused' | 'loading' | 'error';
@@ -37,7 +29,17 @@ interface PlaybackVerse extends TranslationVerse {
 interface SpeechContextValue extends SpeechState {
   speakAyah: (verse: TranslationVerse, language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => void;
   speakSurah: (verses: TranslationVerse[], language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => void;
-  play: (verses: PlaybackVerse[], mode: PlaybackMode, reciterId: ReciterId, language?: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number, repeats?: PlaybackRepeats) => void;
+  play: (
+    verses: PlaybackVerse[],
+    mode: PlaybackMode,
+    reciterId: ReciterId,
+    language?: string,
+    voice?: VoiceProfileId,
+    rate?: number,
+    pitch?: number,
+    volume?: number,
+    repeats?: PlaybackRepeats,
+  ) => void;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   setVolume: (volume: number) => void;
@@ -68,12 +70,13 @@ interface TranslationSynthesisResult {
   error: unknown | null;
 }
 
-interface TranslationPrefetch {
+interface TranslationCacheEntry {
   index: number;
   session: number;
   result: Promise<TranslationSynthesisResult>;
 }
 
+const TRANSLATION_PREFETCH_AHEAD = 2;
 const initialState: SpeechState = {
   status: 'idle',
   currentVerseKey: null,
@@ -112,205 +115,297 @@ export function SpeechProvider({ children }: PropsWithChildren) {
   const pausedRef = useRef(false);
   const advanceRef = useRef<(session: number) => void>(() => undefined);
   const localAudioUriRef = useRef<string | null>(null);
-  const translationAudioUriRef = useRef<string | null>(null);
-  const translationPrefetchRef = useRef<TranslationPrefetch | null>(null);
+  const translationCacheRef = useRef<Map<number, TranslationCacheEntry>>(new Map());
+  const playbackCompletionRef = useRef(createPlaybackCompletionTracker());
 
-  const discardTranslationPrefetch = useCallback(() => {
-    const prefetched = translationPrefetchRef.current;
-    translationPrefetchRef.current = null;
-    if (prefetched) {
-      void prefetched.result.then(({ uri }) => {
+  const clearTranslationCache = useCallback(() => {
+    const cached = [...translationCacheRef.current.values()];
+    translationCacheRef.current.clear();
+    for (const entry of cached) {
+      void entry.result.then(({ uri }) => {
         if (uri) releaseUniformSpeechUri(uri);
       });
     }
   }, []);
 
-  const prefetchTranslation = useCallback((index: number, session: number, queue: QueueConfig, verse: PlaybackVerse) => {
-    const current = translationPrefetchRef.current;
-    if (current?.index === index && current.session === session) return;
-    discardTranslationPrefetch();
-    translationPrefetchRef.current = {
+  const prepareTranslation = useCallback((index: number, session: number, queue: QueueConfig) => {
+    const verse = queue.verses[index];
+    if (!verse) return null;
+    const current = translationCacheRef.current.get(index);
+    if (current?.session === session) return current.result;
+    const entry: TranslationCacheEntry = {
       index,
       session,
       result: synthesizeTranslation(queue, verse),
     };
-  }, [discardTranslationPrefetch]);
+    translationCacheRef.current.set(index, entry);
+    return entry.result;
+  }, []);
 
-  const beginTranslation = useCallback((index: number, session: number) => {
-    const queue = queueRef.current;
-    const verse = queue?.verses[index];
-    if (!queue || !verse || session !== sessionRef.current) return;
-    phaseRef.current = 'translation';
-    readySessionRef.current = 0;
-    setState({
-      status: 'loading',
-      currentVerseKey: verse.key,
-      phase: 'translation',
-      error: null,
-      rangeIteration: rangeRunRef.current,
-      rangeRepeat: queue.repeats.range,
-    });
-    setPlayerVolume(player, queue.volume);
-    const prefetched = translationPrefetchRef.current;
-    const synthesis = prefetched?.index === index && prefetched.session === session
-      ? prefetched.result
-      : synthesizeTranslation(queue, verse);
-    if (prefetched?.index === index && prefetched.session === session) translationPrefetchRef.current = null;
-    else discardTranslationPrefetch();
-    void synthesis.then(({ uri, error }) => {
-      if (!uri) throw error instanceof Error ? error : new Error('Translation speech failed.');
-      if (session !== sessionRef.current) {
-        releaseUniformSpeechUri(uri);
-        return;
-      }
-      if (translationAudioUriRef.current) releaseUniformSpeechUri(translationAudioUriRef.current);
-      translationAudioUriRef.current = uri;
-      player.replace({ uri, name: `Translation ${verse.key}` });
-      readySessionRef.current = session;
-      if (pausedRef.current) setState((current) => ({ ...current, status: 'paused' }));
-      else player.play();
-    }).catch((error) => {
-      if (session === sessionRef.current) setState({
-        status: 'error',
+  const prefetchTranslations = useCallback(
+    (startIndex: number, session: number, queue: QueueConfig, count = TRANSLATION_PREFETCH_AHEAD) => {
+      const end = Math.min(queue.verses.length, startIndex + count);
+      void (async () => {
+        for (let index = startIndex; index < end; index += 1) {
+          if (session !== sessionRef.current) return;
+          const synthesis = prepareTranslation(index, session, queue);
+          if (synthesis) await synthesis;
+        }
+      })();
+    },
+    [prepareTranslation],
+  );
+
+  const pruneTranslationCache = useCallback((currentIndex: number) => {
+    for (const [index, entry] of translationCacheRef.current) {
+      if (index >= currentIndex && index <= currentIndex + TRANSLATION_PREFETCH_AHEAD) continue;
+      translationCacheRef.current.delete(index);
+      void entry.result.then(({ uri }) => {
+        if (uri) releaseUniformSpeechUri(uri);
+      });
+    }
+  }, []);
+
+  const beginTranslation = useCallback(
+    (index: number, session: number) => {
+      const queue = queueRef.current;
+      const verse = queue?.verses[index];
+      if (!queue || !verse || session !== sessionRef.current) return;
+      phaseRef.current = 'translation';
+      readySessionRef.current = 0;
+      setState({
+        status: 'loading',
         currentVerseKey: verse.key,
         phase: 'translation',
-        error: error instanceof Error ? error.message : 'Translation speech failed.',
+        error: null,
         rangeIteration: rangeRunRef.current,
         rangeRepeat: queue.repeats.range,
       });
-    });
-  }, [discardTranslationPrefetch, player]);
+      const synthesis = prepareTranslation(index, session, queue);
+      if (!synthesis) return;
+      void synthesis
+        .then(({ uri, error }) => {
+          if (!uri) throw error instanceof Error ? error : new Error('Translation speech failed.');
+          if (session !== sessionRef.current) {
+            releaseUniformSpeechUri(uri);
+            return;
+          }
+          if (__DEV__) console.info('[Quran Folio TTS]', { text: verse.text.slice(0, 48), uri, verseKey: verse.key });
+          beginPlaybackSource(playbackCompletionRef.current);
+          player.replace({ uri, name: `Translation ${verse.key}` });
+          setPlayerVolume(player, queue.volume);
+          pruneTranslationCache(index);
+          prefetchTranslations(index + 1, session, queue);
+          readySessionRef.current = session;
+          if (pausedRef.current) setState((current) => ({ ...current, status: 'paused' }));
+          else player.play();
+        })
+        .catch((error) => {
+          if (session === sessionRef.current)
+            setState({
+              status: 'error',
+              currentVerseKey: verse.key,
+              phase: 'translation',
+              error: error instanceof Error ? error.message : 'Translation speech failed.',
+              rangeIteration: rangeRunRef.current,
+              rangeRepeat: queue.repeats.range,
+            });
+        });
+    },
+    [player, prefetchTranslations, prepareTranslation, pruneTranslationCache],
+  );
 
-  const beginRecitation = useCallback((index: number, session: number) => {
-    const queue = queueRef.current;
-    const verse = queue?.verses[index];
-    if (!queue || !verse || session !== sessionRef.current) return;
-    phaseRef.current = 'recitation';
-    readySessionRef.current = 0;
-    setState({
-      status: 'loading',
-      currentVerseKey: verse.key,
-      phase: 'recitation',
-      error: null,
-      rangeIteration: rangeRunRef.current,
-      rangeRepeat: queue.repeats.range,
-    });
-    setPlayerVolume(player, queue.volume);
-    void resolveRecitationPlaybackSource(queue.reciterId, verse.key).then(({ uri, localUri }) => {
-      if (session !== sessionRef.current) {
-        if (localUri) releaseDownloadedRecitationUri(localUri);
+  const beginRecitation = useCallback(
+    (index: number, session: number) => {
+      const queue = queueRef.current;
+      const verse = queue?.verses[index];
+      if (!queue || !verse || session !== sessionRef.current) return;
+      phaseRef.current = 'recitation';
+      readySessionRef.current = 0;
+      setState({
+        status: 'loading',
+        currentVerseKey: verse.key,
+        phase: 'recitation',
+        error: null,
+        rangeIteration: rangeRunRef.current,
+        rangeRepeat: queue.repeats.range,
+      });
+      void resolveRecitationPlaybackSource(queue.reciterId, verse.key).then(({ uri, localUri }) => {
+        if (session !== sessionRef.current) {
+          if (localUri) releaseDownloadedRecitationUri(localUri);
+          return;
+        }
+        if (localAudioUriRef.current) releaseDownloadedRecitationUri(localAudioUriRef.current);
+        localAudioUriRef.current = localUri;
+        beginPlaybackSource(playbackCompletionRef.current);
+        player.replace({ uri, name: verse.key });
+        setPlayerVolume(player, queue.volume);
+        readySessionRef.current = session;
+        if (pausedRef.current) setState((current) => ({ ...current, status: 'paused' }));
+        else player.play();
+        if (queue.mode === 'both') prefetchTranslations(index, session, queue, TRANSLATION_PREFETCH_AHEAD + 1);
+      });
+    },
+    [player, prefetchTranslations],
+  );
+
+  const beginAt = useCallback(
+    (index: number, session: number) => {
+      const queue = queueRef.current;
+      const verse = queue?.verses[index];
+      if (!queue || !verse || session !== sessionRef.current) {
+        phaseRef.current = null;
+        setState((current) => ({
+          ...current,
+          status: 'idle',
+          phase: null,
+          error: null,
+        }));
         return;
       }
-      if (localAudioUriRef.current) releaseDownloadedRecitationUri(localAudioUriRef.current);
-      localAudioUriRef.current = localUri;
-      player.replace({ uri, name: verse.key });
-      readySessionRef.current = session;
-      if (pausedRef.current) setState((current) => ({ ...current, status: 'paused' }));
-      else player.play();
-      if (queue.mode === 'both') prefetchTranslation(index, session, queue, verse);
-    });
-  }, [player, prefetchTranslation]);
+      indexRef.current = index;
+      if (queue.mode === 'translation') beginTranslation(index, session);
+      else beginRecitation(index, session);
+    },
+    [beginRecitation, beginTranslation],
+  );
 
-  const beginAt = useCallback((index: number, session: number) => {
-    const queue = queueRef.current;
-    const verse = queue?.verses[index];
-    if (!queue || !verse || session !== sessionRef.current) {
-      phaseRef.current = null;
-      setState((current) => ({ ...current, status: 'idle', phase: null, error: null }));
-      return;
-    }
-    indexRef.current = index;
-    if (queue.mode === 'translation') beginTranslation(index, session);
-    else beginRecitation(index, session);
-  }, [beginRecitation, beginTranslation]);
+  const advance = useCallback(
+    (session: number) => {
+      const queue = queueRef.current;
+      if (!queue || session !== sessionRef.current) return;
+      if (queue.mode === 'both' && phaseRef.current === 'recitation') {
+        beginTranslation(indexRef.current, session);
+      } else if (ayahRunRef.current < queue.repeats.ayah) {
+        ayahRunRef.current += 1;
+        beginAt(indexRef.current, session);
+      } else if (indexRef.current + 1 < queue.verses.length) {
+        ayahRunRef.current = 1;
+        beginAt(indexRef.current + 1, session);
+      } else if (rangeRunRef.current < queue.repeats.range) {
+        rangeRunRef.current += 1;
+        ayahRunRef.current = 1;
+        beginAt(0, session);
+      } else {
+        beginAt(queue.verses.length, session);
+      }
+    },
+    [beginAt, beginTranslation],
+  );
 
-  const advance = useCallback((session: number) => {
-    const queue = queueRef.current;
-    if (!queue || session !== sessionRef.current) return;
-    if (queue.mode === 'both' && phaseRef.current === 'recitation') {
-      beginTranslation(indexRef.current, session);
-    } else if (ayahRunRef.current < queue.repeats.ayah) {
-      ayahRunRef.current += 1;
-      beginAt(indexRef.current, session);
-    } else if (indexRef.current + 1 < queue.verses.length) {
-      ayahRunRef.current = 1;
-      beginAt(indexRef.current + 1, session);
-    } else if (rangeRunRef.current < queue.repeats.range) {
-      rangeRunRef.current += 1;
-      ayahRunRef.current = 1;
-      beginAt(0, session);
-    } else {
-      beginAt(queue.verses.length, session);
-    }
-  }, [beginAt, beginTranslation]);
-
-  useEffect(() => { advanceRef.current = advance; }, [advance]);
+  useEffect(() => {
+    advanceRef.current = advance;
+  }, [advance]);
   useEffect(() => {
     if (!phaseRef.current) return;
+    const playbackEvent = playerStatus.error
+      ? null
+      : observePlaybackStatus(playbackCompletionRef.current, {
+          currentTime: playerStatus.currentTime,
+          didJustFinish: playerStatus.didJustFinish,
+          isBuffering: playerStatus.isBuffering,
+          isLoaded: playerStatus.isLoaded,
+          playbackState: playerStatus.playbackState,
+          playing: playerStatus.playing,
+        });
     if (playerStatus.error) {
-      if (phaseRef.current === 'recitation') discardTranslationPrefetch();
+      if (phaseRef.current === 'recitation') clearTranslationCache();
       // Audio status is an external native event reflected into React state.
       setState((current) => ({
         ...current,
         status: 'error',
-        error: phaseRef.current === 'recitation'
-          ? 'Recitation could not be played. Check the download or your connection and try again.'
-          : 'Translation speech could not be played.',
+        error: phaseRef.current === 'recitation' ? 'Recitation could not be played. Check the download or your connection and try again.' : 'Translation speech could not be played.',
       }));
-    } else if (playerStatus.didJustFinish) {
+    } else if (playbackEvent === 'completed') {
       advanceRef.current(sessionRef.current);
-    } else if (playerStatus.playing) {
+    } else if (playbackEvent === 'playing') {
       // Audio status is an external native event reflected into React state.
       setState((current) => ({ ...current, status: 'speaking', error: null }));
     }
-  }, [discardTranslationPrefetch, playerStatus.didJustFinish, playerStatus.error, playerStatus.playing]);
+  }, [
+    clearTranslationCache,
+    playerStatus.currentTime,
+    playerStatus.didJustFinish,
+    playerStatus.error,
+    playerStatus.isBuffering,
+    playerStatus.isLoaded,
+    playerStatus.playbackState,
+    playerStatus.playing,
+  ]);
 
   useEffect(() => {
-    void setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'doNotMix', shouldPlayInBackground: true });
+    void setAudioModeAsync({
+      playsInSilentMode: true,
+      interruptionMode: 'doNotMix',
+      shouldPlayInBackground: true,
+    });
+    void warmUniformVoiceEngine().catch(() => undefined);
   }, []);
 
-  const play = useCallback((verses: PlaybackVerse[], mode: PlaybackMode, reciterId: ReciterId, language = 'en', voice: VoiceProfileId = DEFAULT_VOICE_PROFILE_ID, rate = getTtsSpeed(null).value, pitch = 1, volume = 1, repeats: PlaybackRepeats = { range: 1, ayah: 1 }) => {
-    discardTranslationPrefetch();
-    sessionRef.current += 1;
-    pausedRef.current = false;
-    readySessionRef.current = 0;
-    player.pause();
-    queueRef.current = {
-      verses,
-      mode,
-      reciterId,
-      language,
-      voice,
-      rate,
-      pitch,
-      volume: Math.max(0, Math.min(1, volume)),
-      repeats: {
-        range: Math.max(1, repeats.range),
-        ayah: Math.max(1, repeats.ayah),
-        startAt: Math.max(0, Math.min(verses.length - 1, repeats.startAt ?? 0)),
-      },
-    };
-    indexRef.current = queueRef.current.repeats.startAt ?? 0;
-    ayahRunRef.current = 1;
-    rangeRunRef.current = 1;
-    beginAt(indexRef.current, sessionRef.current);
-  }, [beginAt, discardTranslationPrefetch, player]);
+  const play = useCallback(
+    (
+      verses: PlaybackVerse[],
+      mode: PlaybackMode,
+      reciterId: ReciterId,
+      language = 'en',
+      voice: VoiceProfileId = DEFAULT_VOICE_PROFILE_ID,
+      rate = getTtsSpeed(null).value,
+      pitch = 1,
+      volume = 1,
+      repeats: PlaybackRepeats = { range: 1, ayah: 1 },
+    ) => {
+      clearTranslationCache();
+      sessionRef.current += 1;
+      pausedRef.current = false;
+      readySessionRef.current = 0;
+      player.pause();
+      queueRef.current = {
+        verses,
+        mode,
+        reciterId,
+        language,
+        voice,
+        rate,
+        pitch,
+        volume: Math.max(0, Math.min(1, volume)),
+        repeats: {
+          range: Math.max(1, repeats.range),
+          ayah: Math.max(1, repeats.ayah),
+          startAt: Math.max(0, Math.min(verses.length - 1, repeats.startAt ?? 0)),
+        },
+      };
+      indexRef.current = queueRef.current.repeats.startAt ?? 0;
+      ayahRunRef.current = 1;
+      rangeRunRef.current = 1;
+      beginAt(indexRef.current, sessionRef.current);
+    },
+    [beginAt, clearTranslationCache, player],
+  );
 
-  const speakSurah = useCallback((verses: TranslationVerse[], language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => {
-    play(verses, 'translation', 'husary', language, voice, rate, pitch, volume);
-  }, [play]);
-  const speakAyah = useCallback((verse: TranslationVerse, language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => {
-    play([verse], 'translation', 'husary', language, voice, rate, pitch, volume);
-  }, [play]);
+  const speakSurah = useCallback(
+    (verses: TranslationVerse[], language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => {
+      play(verses, 'translation', 'husary', language, voice, rate, pitch, volume);
+    },
+    [play],
+  );
+  const speakAyah = useCallback(
+    (verse: TranslationVerse, language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => {
+      play([verse], 'translation', 'husary', language, voice, rate, pitch, volume);
+    },
+    [play],
+  );
 
-  const setVolume = useCallback((volume: number) => {
-    const next = Math.max(0, Math.min(1, volume));
-    if (queueRef.current) queueRef.current = { ...queueRef.current, volume: next };
-    setPlayerVolume(player, next);
-  }, [player]);
+  const setVolume = useCallback(
+    (volume: number) => {
+      const next = Math.max(0, Math.min(1, volume));
+      if (queueRef.current) queueRef.current = { ...queueRef.current, volume: next };
+      setPlayerVolume(player, next);
+    },
+    [player],
+  );
 
   const stop = useCallback(async () => {
-    discardTranslationPrefetch();
+    clearTranslationCache();
     sessionRef.current += 1;
     pausedRef.current = false;
     readySessionRef.current = 0;
@@ -319,11 +414,18 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     player.pause();
     if (localAudioUriRef.current) releaseDownloadedRecitationUri(localAudioUriRef.current);
     localAudioUriRef.current = null;
-    if (translationAudioUriRef.current) releaseUniformSpeechUri(translationAudioUriRef.current);
-    translationAudioUriRef.current = null;
-    setState((current) => ({ ...current, status: 'idle', phase: null, error: null }));
-  }, [discardTranslationPrefetch, player]);
-  const reset = useCallback(async () => { await stop(); indexRef.current = 0; setState(initialState); }, [stop]);
+    setState((current) => ({
+      ...current,
+      status: 'idle',
+      phase: null,
+      error: null,
+    }));
+  }, [clearTranslationCache, player]);
+  const reset = useCallback(async () => {
+    await stop();
+    indexRef.current = 0;
+    setState(initialState);
+  }, [stop]);
 
   const pause = useCallback(async () => {
     if (state.status !== 'speaking' && state.status !== 'loading') return;
@@ -343,14 +445,29 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     }
   }, [player, state.status]);
 
-  useEffect(() => () => {
-    discardTranslationPrefetch();
-    player.pause();
-    if (localAudioUriRef.current) releaseDownloadedRecitationUri(localAudioUriRef.current);
-    if (translationAudioUriRef.current) releaseUniformSpeechUri(translationAudioUriRef.current);
-  }, [discardTranslationPrefetch, player]);
+  useEffect(
+    () => () => {
+      clearTranslationCache();
+      player.pause();
+      if (localAudioUriRef.current) releaseDownloadedRecitationUri(localAudioUriRef.current);
+    },
+    [clearTranslationCache, player],
+  );
 
-  const value = useMemo(() => ({ ...state, speakAyah, speakSurah, play, pause, resume, setVolume, stop, reset }), [pause, play, reset, resume, setVolume, speakAyah, speakSurah, state, stop]);
+  const value = useMemo(
+    () => ({
+      ...state,
+      speakAyah,
+      speakSurah,
+      play,
+      pause,
+      resume,
+      setVolume,
+      stop,
+      reset,
+    }),
+    [pause, play, reset, resume, setVolume, speakAyah, speakSurah, state, stop],
+  );
   return <SpeechContext.Provider value={value}>{children}</SpeechContext.Provider>;
 }
 

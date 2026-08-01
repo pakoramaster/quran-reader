@@ -1,13 +1,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { pipeline } = require('node:stream/promises');
-const { Readable } = require('node:stream');
 const tar = require('tar-stream');
 const unbzip2 = require('unbzip2-stream');
 
-const modelId = 'kokoro-en-v0_19';
-const modelUrl =
-  `https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${modelId}.tar.bz2`;
+const modelId = 'kokoro-int8-en-v0_19';
 
 const abbreviationEnd =
   /\b(?:dr|mr|mrs|ms|prof|sr|jr|st|vs|etc)\.$/i;
@@ -127,7 +124,7 @@ function prepareTtsChunks(text, maxLength = 280) {
 
 function modelFiles(modelRoot) {
   return {
-    model: path.join(modelRoot, 'model.onnx'),
+    model: path.join(modelRoot, fs.existsSync(path.join(modelRoot, 'model.int8.onnx')) ? 'model.int8.onnx' : 'model.onnx'),
     voices: path.join(modelRoot, 'voices.bin'),
     tokens: path.join(modelRoot, 'tokens.txt'),
     dataDir: path.join(modelRoot, 'espeak-ng-data'),
@@ -303,91 +300,17 @@ function generationRequest(
   };
 }
 
-function createTtsService(dataRoot) {
-  const voiceRoot = path.join(
-    dataRoot,
-    'voice-models',
-  );
-
-  const modelRoot = path.join(
-    voiceRoot,
-    modelId,
-  );
-
-  const archivePath = path.join(
-    voiceRoot,
-    `${modelId}.tar.bz2`,
-  );
-
-  let ensurePromise;
+function createTtsService(_dataRoot, bundledModelsRoot = path.resolve(__dirname, '..', 'assets', 'tts-native', 'models')) {
+  const modelRoot = path.join(bundledModelsRoot, modelId);
   let enginePromise;
   let engineInstance = null;
+  let generationTail = Promise.resolve();
+  const audioCache = new Map();
+  const synthesisPromises = new Map();
 
   async function ensureModel() {
-    if (isReady(modelRoot)) {
-      return modelRoot;
-    }
-
-    if (!ensurePromise) {
-      ensurePromise = (async () => {
-        fs.mkdirSync(voiceRoot, {
-          recursive: true,
-        });
-
-        try {
-          const response =
-            await fetch(modelUrl);
-
-          if (
-            !response.ok ||
-            !response.body
-          ) {
-            throw new Error(
-              `Voice pack download failed ` +
-              `(${response.status} ${response.statusText}).`,
-            );
-          }
-
-          await pipeline(
-            Readable.fromWeb(
-              response.body,
-            ),
-            fs.createWriteStream(
-              archivePath,
-              {
-                flags: 'w',
-              },
-            ),
-          );
-
-          await extractTarBz2(
-            archivePath,
-            voiceRoot,
-          );
-
-          if (!isReady(modelRoot)) {
-            fs.rmSync(modelRoot, {
-              recursive: true,
-              force: true,
-            });
-
-            throw new Error(
-              'The downloaded voice pack is incomplete.',
-            );
-          }
-
-          return modelRoot;
-        } finally {
-          fs.rmSync(archivePath, {
-            force: true,
-          });
-        }
-      })().finally(() => {
-        ensurePromise = undefined;
-      });
-    }
-
-    return ensurePromise;
+    if (isReady(modelRoot)) return modelRoot;
+    throw new Error('The bundled Kokoro voice pack is missing. Run npm run prepare:tts-model before building the app.');
   }
 
   async function engine() {
@@ -430,21 +353,34 @@ function createTtsService(dataRoot) {
 
     ensureModel,
 
+    warm: engine,
+
     async synthesize({
       text,
       speakerId,
       speed,
     }) {
-      const tts = await engine();
-
-      const chunks =
-        prepareTtsChunks(text);
-
-      if (!chunks.length) {
-        throw new Error(
-          'Translation speech text is empty.',
-        );
+      const cacheKey = JSON.stringify([text, speakerId, speed]);
+      const cached = audioCache.get(cacheKey);
+      if (cached) {
+        audioCache.delete(cacheKey);
+        audioCache.set(cacheKey, cached);
+        return cached;
       }
+      const existing = synthesisPromises.get(cacheKey);
+      if (existing) return existing;
+
+      const generate = async () => {
+        const tts = await engine();
+
+        const chunks =
+          prepareTtsChunks(text);
+
+        if (!chunks.length) {
+          throw new Error(
+            'Translation speech text is empty.',
+          );
+        }
 
       const generated = [];
 
@@ -542,10 +478,21 @@ function createTtsService(dataRoot) {
           audio.samples.length;
       }
 
-      return encodeWav(
-        samples,
-        sampleRate,
-      );
+        return encodeWav(
+          samples,
+          sampleRate,
+        );
+      };
+
+      const generation = generationTail.then(generate, generate);
+      generationTail = generation.then(() => undefined, () => undefined);
+      const pending = generation.then((wav) => {
+        audioCache.set(cacheKey, wav);
+        while (audioCache.size > 32) audioCache.delete(audioCache.keys().next().value);
+        return wav;
+      }).finally(() => synthesisPromises.delete(cacheKey));
+      synthesisPromises.set(cacheKey, pending);
+      return pending;
     },
   };
 }

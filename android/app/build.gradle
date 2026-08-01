@@ -104,6 +104,9 @@ android {
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
+    sourceSets {
+        main.assets.srcDir("${projectRoot}/assets/tts-native")
+    }
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -144,6 +147,13 @@ android {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
 }
+
+tasks.register("prepareBundledTtsModel", Exec) {
+    workingDir projectRoot
+    commandLine "node", "scripts/prepare-kokoro-model.mjs"
+}
+
+preBuild.dependsOn("prepareBundledTtsModel")
 
 gradle.taskGraph.whenReady { taskGraph ->
     def requestsReleaseBuild = taskGraph.allTasks.any { task ->

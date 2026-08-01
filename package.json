@@ -6,16 +6,18 @@
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
+    "prepare:tts-model": "node scripts/prepare-kokoro-model.mjs",
+    "eas-build-post-install": "npm run prepare:tts-model",
     "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
+    "android": "npm run prepare:tts-model && expo run:android",
+    "ios": "npm run prepare:tts-model && expo run:ios",
     "web": "expo start --web",
     "web:build": "expo export --platform web",
     "desktop:dev": "node desktop/dev.mjs",
     "desktop:run": "node desktop/run.mjs desktop/main.cjs",
-    "desktop:build": "npm run web:build && electron-builder --win --dir",
-    "desktop:package": "npm run web:build && electron-builder --win nsis --publish never",
-    "desktop:package:win7": "electron-builder --win nsis --publish never -c.electronVersion=22.3.27 -c.directories.output=release-win7",
+    "desktop:build": "npm run prepare:tts-model && npm run web:build && electron-builder --win --dir",
+    "desktop:package": "npm run prepare:tts-model && npm run web:build && electron-builder --win nsis --publish never",
+    "desktop:package:win7": "npm run prepare:tts-model && electron-builder --win nsis --publish never -c.electronVersion=22.3.27 -c.directories.output=release-win7",
     "build:quran": "node scripts/build-quran-database.mjs",
     "verify:quran": "node scripts/verify-quran-database.mjs",
     "typecheck": "tsc --noEmit",
@@ -34,6 +36,7 @@
     },
     "files": [
       "desktop/*.cjs",
+      "assets/tts-native/models/**/*",
       "dist/**/*",
       "package.json",
       "!node_modules/**/*",
@@ -51,6 +54,7 @@
     ],
     "asar": true,
     "asarUnpack": [
+      "assets/tts-native/models/**/*",
       "node_modules/sherpa-onnx-win-x64/**/*"
     ],
     "win": {

@@ -1,8 +1,21 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+
+const mockGenerateAsync = jest.fn(async () => ({
+  sampleRate: 24_000,
+  samples: Float32Array.from([0, 0.25, -0.25]),
+}));
+
+jest.mock('sherpa-onnx-node', () => ({
+  OfflineTts: {
+    createAsync: jest.fn(async () => ({ generateAsync: mockGenerateAsync })),
+  },
+}));
 
 // The Electron voice service remains CommonJS so it can run without transpilation.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { encodeWav, generationRequest, prepareTtsChunks, resolveArchiveTarget } = require('../../desktop/ttsServer.cjs');
+const { createTtsService, encodeWav, generationRequest, prepareTtsChunks, resolveArchiveTarget } = require('../../desktop/ttsServer.cjs');
 
 describe('desktop uniform voice service', () => {
   it('encodes generated floating-point samples as a valid mono PCM WAV', () => {
@@ -37,10 +50,27 @@ describe('desktop uniform voice service', () => {
   });
 
   it('uses the same natural sentence boundaries as the native engine', () => {
-    expect(prepareTtsChunks('Dr. Smith listened. Mercy—compassion…always')).toEqual([
-      'Dr. Smith listened.',
-      'Mercy, compassion...',
-      'always.',
-    ]);
+    expect(prepareTtsChunks('Dr. Smith listened. Mercy—compassion…always')).toEqual(['Dr. Smith listened.', 'Mercy, compassion...', 'always.']);
+  });
+
+  it('loads the bundled int8 model and reuses synthesized audio', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'quran-folio-tts-test-'));
+    const model = path.join(root, 'kokoro-int8-en-v0_19');
+    fs.mkdirSync(path.join(model, 'espeak-ng-data'), { recursive: true });
+    for (const filename of ['model.int8.onnx', 'voices.bin', 'tokens.txt']) fs.writeFileSync(path.join(model, filename), 'fixture');
+
+    try {
+      mockGenerateAsync.mockClear();
+      const service = createTtsService(path.join(root, 'unused-user-data'), root);
+      const request = { speakerId: 2, speed: 1, text: 'A bundled standard voice.' };
+      const first = await service.synthesize(request);
+      const second = await service.synthesize(request);
+
+      expect(service.ready()).toBe(true);
+      expect(first.equals(second)).toBe(true);
+      expect(mockGenerateAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      fs.rmSync(root, { force: true, recursive: true });
+    }
   });
 });

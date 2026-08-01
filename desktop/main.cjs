@@ -19,7 +19,11 @@ async function resolveStartUrl() {
   if (startUrl) return startUrl;
 
   const appRoot = app.isPackaged ? app.getAppPath() : path.resolve(__dirname, '..');
+  const bundledModelsRoot = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets', 'tts-native', 'models')
+    : path.join(appRoot, 'assets', 'tts-native', 'models');
   localServer = await startStaticServer({
+    bundledModelsRoot,
     dataRoot: app.getPath('userData'),
     port: productionPort,
     webRoot: path.join(appRoot, 'dist'),

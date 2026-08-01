@@ -13,7 +13,8 @@
       "expo-font",
       "expo-localization",
       "expo-status-bar",
-      "expo-audio"
+      "expo-audio",
+      "./plugins/withBundledTtsModel"
     ],
     "experiments": {
       "typedRoutes": true
