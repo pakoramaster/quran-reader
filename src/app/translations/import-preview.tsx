@@ -77,6 +77,7 @@ export default function ImportPreviewScreen() {
     <FolioScreen
       action={<Pressable accessibilityLabel="Close preview" onPress={() => router.back()} style={styles.close}><Ionicons color={colors.ink} name="close" size={24} /></Pressable>}
       eyebrow={replacement ? 'Replacement preview' : 'New translation preview'}
+      safeBottom
       subtitle="Review the identity and attribution before anything is written to your private library."
       title="Ready to import"
     >

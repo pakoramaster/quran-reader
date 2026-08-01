@@ -51,6 +51,26 @@ export async function listAyahs(db: SQLiteDatabase, surahNumber: number): Promis
   }));
 }
 
+export async function listAyahsInRange(
+  db: SQLiteDatabase,
+  startSurah: number,
+  endSurah: number,
+): Promise<QuranAyah[]> {
+  const rows = await db.getAllAsync<AyahRow>(
+    `SELECT * FROM ayahs
+     WHERE surah_number BETWEEN ? AND ?
+     ORDER BY surah_number, ayah_number`,
+    startSurah,
+    endSurah,
+  );
+  return rows.map((row) => ({
+    surahNumber: row.surah_number,
+    ayahNumber: row.ayah_number,
+    verseKey: row.verse_key,
+    textUthmani: row.text_uthmani,
+  }));
+}
+
 export async function getAyah(
   db: SQLiteDatabase,
   surahNumber: number,

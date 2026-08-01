@@ -14,7 +14,10 @@ import { AnnotationEditor } from '@/features/annotations/ui/AnnotationEditor';
 import { getSurah, listAyahs } from '@/features/quran-reader/data/quranRepository';
 import { DEFAULT_RECITER_ID, getReciter, isReciterId, RECITERS, type PlaybackMode, type ReciterId } from '@/features/recitation/domain/reciters';
 import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
+import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
+import { DEFAULT_VOICE_PROFILE_ID, isVoiceProfileId } from '@/features/speech/domain/voiceProfiles';
+import { getTtsSpeed, isTtsSpeedId } from '@/features/speech/domain/ttsSpeeds';
 import {
   getActiveTranslationId,
   getTranslation,
@@ -31,13 +34,13 @@ export default function SurahReaderScreen() {
   const userDb = useUserDatabase();
   const queryClient = useQueryClient();
   const speech = useSpeech();
+  const readingFontSize = useReadingFontSize();
   const listRef = useRef<FlatList<ReaderAyah>>(null);
   const [editorAyah, setEditorAyah] = useState<ReaderAyah | null>(null);
   const [selectedAyahNumber, setSelectedAyahNumber] = useState<number | null>(null);
   const [spokenAyahNumber, setSpokenAyahNumber] = useState<number | null>(null);
   const [playbackModeOverride, setPlaybackModeOverride] = useState<PlaybackMode | null>(null);
   const [reciterIdOverride, setReciterIdOverride] = useState<ReciterId | null>(null);
-
   const surah = useQuery({
     queryKey: ['surah', surahNumber],
     queryFn: () => getSurah(quranDb, surahNumber),
@@ -65,8 +68,8 @@ export default function SurahReaderScreen() {
   const speechSettings = useQuery({
     queryKey: ['speech-settings', activeTranslation.data?.language],
     queryFn: async () => ({
-      voice: await getSetting(userDb, `tts_voice_${activeTranslation.data!.language}`),
-      rate: Number(await getSetting(userDb, 'tts_rate')) || 0.9,
+      profile: await getSetting(userDb, 'tts_voice_profile'),
+      speed: await getSetting(userDb, 'tts_speed'),
     }),
     enabled: Boolean(activeTranslation.data?.language),
   });
@@ -79,6 +82,8 @@ export default function SurahReaderScreen() {
     ?? (storedMode === 'recitation' || ((storedMode === 'translation' || storedMode === 'both') && activeTranslation.data) ? storedMode : 'recitation');
   const storedReciter = playbackSettings.data?.reciter ?? null;
   const reciterId = reciterIdOverride ?? (isReciterId(storedReciter) ? storedReciter : DEFAULT_RECITER_ID);
+  const voiceProfileId = isVoiceProfileId(speechSettings.data?.profile) ? speechSettings.data.profile : DEFAULT_VOICE_PROFILE_ID;
+  const voiceSpeed = getTtsSpeed(isTtsSpeedId(speechSettings.data?.speed) ? speechSettings.data.speed : null);
   const annotations = useQuery({
     queryKey: ['annotations', surahNumber],
     queryFn: () => listAnnotationsForSurah(userDb, surahNumber),
@@ -159,8 +164,9 @@ export default function SurahReaderScreen() {
       playbackMode,
       reciterId,
       activeTranslation.data?.language,
-      speechSettings.data?.voice ?? undefined,
-      speechSettings.data?.rate,
+      voiceProfileId,
+      voiceSpeed.value,
+      1,
     );
   };
 
@@ -292,8 +298,9 @@ export default function SurahReaderScreen() {
                         playbackMode,
                         reciterId,
                         activeTranslation.data?.language,
-                        speechSettings.data?.voice ?? undefined,
-                        speechSettings.data?.rate,
+                        voiceProfileId,
+                        voiceSpeed.value,
+                        1,
                       );
                     }}
                     style={styles.iconButton}
@@ -318,13 +325,13 @@ export default function SurahReaderScreen() {
                   ) : null}
                 </View>
               </View>
-              <Text selectable style={styles.ayahArabic}>{item.textUthmani} <Text style={styles.ayahNumber}>﴿{item.ayahNumber}﴾</Text></Text>
+              <Text selectable style={[styles.ayahArabic, { fontSize: 29 * readingFontSize.scale, lineHeight: 52 * readingFontSize.scale }]}>{item.textUthmani} <Text style={[styles.ayahNumber, { fontSize: 21 * readingFontSize.scale }]}>﴿{item.ayahNumber}﴾</Text></Text>
               {item.translationText ? <View style={styles.divider} /> : null}
-              {item.translationText ? <Text selectable style={styles.translation}>{item.translationText}</Text> : null}
+              {item.translationText ? <Text selectable style={[styles.translation, { fontSize: 19 * readingFontSize.scale, lineHeight: 27 * readingFontSize.scale }]}>{item.translationText}</Text> : null}
               {item.annotation?.noteText ? (
                 <View style={styles.notePreview}>
                   <Text style={styles.noteLabel}>REFLECTION</Text>
-                  <Text numberOfLines={3} style={styles.noteText}>{item.annotation.noteText}</Text>
+                  <Text numberOfLines={3} style={[styles.noteText, { fontSize: 17 * readingFontSize.scale, lineHeight: 22 * readingFontSize.scale }]}>{item.annotation.noteText}</Text>
                 </View>
               ) : null}
             </Pressable>

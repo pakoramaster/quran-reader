@@ -4,7 +4,7 @@ import { colors, fontFamilies, spacing } from '@/theme/tokens';
 import { FolioButton } from './FolioButton';
 
 interface EmptyFolioProps {
-  glyph: string;
+  glyph?: string;
   title: string;
   body: string;
   actionLabel?: string;
@@ -14,7 +14,7 @@ interface EmptyFolioProps {
 export function EmptyFolio({ glyph, title, body, actionLabel, onAction }: EmptyFolioProps) {
   return (
     <View style={styles.container}>
-      <Text style={styles.glyph}>{glyph}</Text>
+      {glyph ? <Text style={styles.glyph}>{glyph}</Text> : null}
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.body}>{body}</Text>
       {actionLabel && onAction ? <FolioButton label={actionLabel} onPress={onAction} style={styles.button} /> : null}

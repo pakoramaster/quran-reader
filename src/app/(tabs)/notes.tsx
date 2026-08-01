@@ -6,7 +6,7 @@ import { useDeferredValue, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { EmptyFolio } from '@/components/EmptyFolio';
-import { FolioScreen } from '@/components/FolioScreen';
+import { FolioHeader, FolioScreen } from '@/components/FolioScreen';
 import { LoadingFolio } from '@/components/LoadingFolio';
 import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import {
@@ -16,6 +16,7 @@ import {
 } from '@/features/annotations/data/annotationRepository';
 import { AnnotationEditor } from '@/features/annotations/ui/AnnotationEditor';
 import { getAyah } from '@/features/quran-reader/data/quranRepository';
+import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
 import { listTranslations } from '@/features/translations/data/translationRepository';
 import { requestConfirmation, showMessage } from '@/platform/dialogs/dialogs';
 import { FolioTextInput } from '@/platform/ui/FolioTextInput';
@@ -28,6 +29,7 @@ export default function NotesScreen() {
   const db = useUserDatabase();
   const quranDb = useSQLiteContext();
   const queryClient = useQueryClient();
+  const readingFontSize = useReadingFontSize();
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
   const [translationId, setTranslationId] = useState<string | null>(null);
@@ -118,81 +120,82 @@ export default function NotesScreen() {
   };
 
   return (
-    <FolioScreen
-      scroll={false}
-      eyebrow="Your marginalia"
-      subtitle="Search private reflections and return to the exact Ayah where each thought began."
-      title="Notes & Highlights"
-    >
-      <View style={styles.searchBox}>
-        <Ionicons color={colors.gold} name="search" size={20} />
-        <FolioTextInput
-          accessibilityLabel="Search notes and translation text"
-          onChangeText={setSearch}
-          placeholder="Search your reflections…"
-          placeholderTextColor={colors.inkMuted}
-          style={styles.searchInput}
-          value={search}
-        />
-        {search ? <Pressable onPress={() => setSearch('')}><Ionicons color={colors.inkMuted} name="close-circle" size={20} /></Pressable> : null}
-      </View>
-
-      <Text style={styles.filterLabel}>TRANSLATION · {selectedTranslationName}</Text>
-      <View style={styles.chipRow}>
-        <FilterChip active={!effectiveTranslationId} label="All" onPress={() => setTranslationId(null)} />
-        {translations.data?.map((translation) => (
-          <FilterChip
-            active={effectiveTranslationId === translation.id}
-            key={translation.id}
-            label={translation.title}
-            onPress={() => setTranslationId(translation.id)}
+    <FolioScreen scroll={false}>
+      <FlatList
+        contentContainerStyle={styles.list}
+        data={annotations.data ?? []}
+        initialNumToRender={10}
+        keyExtractor={(annotation) => annotation.verseKey}
+        ListEmptyComponent={annotations.isLoading ? (
+          <LoadingFolio label="Gathering your reflections…" />
+        ) : (
+          <EmptyFolio
+            body="Notes and whole-Ayah highlights you add in the reader will gather here."
+            glyph="✦"
+            title={search || effectiveTranslationId || color ? 'No matching reflections' : 'The margins are quiet'}
           />
-        ))}
-      </View>
-      <Text style={styles.filterLabel}>HIGHLIGHT</Text>
-      <View style={styles.colorRow}>
-        {highlightFilters.map((highlight) => (
-          <Pressable
-            accessibilityLabel={highlight ? `${highlight} highlights` : 'All highlight colors'}
-            key={highlight ?? 'all'}
-            onPress={() => setColor(highlight)}
-            style={[
-              styles.colorChip,
-              highlight ? { backgroundColor: colors.highlight[highlight] } : null,
-              color === highlight ? styles.colorChipActive : null,
-            ]}
-          >
-            {!highlight ? <Text style={styles.allColor}>ALL</Text> : null}
-          </Pressable>
-        ))}
-      </View>
-
-      {annotations.isLoading ? (
-        <LoadingFolio label="Gathering your reflections…" />
-      ) : (
-        <FlatList
-          contentContainerStyle={styles.list}
-          data={annotations.data ?? []}
-          initialNumToRender={10}
-          keyExtractor={(annotation) => annotation.verseKey}
-          ListEmptyComponent={
-            <EmptyFolio
-              body="Notes and whole-Ayah highlights you add in the reader will gather here."
-              glyph="✦"
-              title={search || effectiveTranslationId || color ? 'No matching reflections' : 'The margins are quiet'}
+        )}
+        ListHeaderComponent={(
+          <>
+            <FolioHeader
+              eyebrow="Your marginalia"
+              subtitle="Search private reflections and return to the exact Ayah where each thought began."
+              title="Notes & Highlights"
             />
-          }
-          renderItem={({ item }) => (
+            <View style={styles.searchBox}>
+              <Ionicons color={colors.gold} name="search" size={20} />
+              <FolioTextInput
+                accessibilityLabel="Search notes and translation text"
+                onChangeText={setSearch}
+                placeholder="Search your reflections…"
+                placeholderTextColor={colors.inkMuted}
+                style={styles.searchInput}
+                value={search}
+              />
+              {search ? <Pressable onPress={() => setSearch('')}><Ionicons color={colors.inkMuted} name="close-circle" size={20} /></Pressable> : null}
+            </View>
+            <Text style={styles.filterLabel}>TRANSLATION · {selectedTranslationName}</Text>
+            <View style={styles.chipRow}>
+              <FilterChip active={!effectiveTranslationId} label="All" onPress={() => setTranslationId(null)} />
+              {translations.data?.map((translation) => (
+                <FilterChip
+                  active={effectiveTranslationId === translation.id}
+                  key={translation.id}
+                  label={translation.title}
+                  onPress={() => setTranslationId(translation.id)}
+                />
+              ))}
+            </View>
+            <Text style={styles.filterLabel}>HIGHLIGHT</Text>
+            <View style={styles.colorRow}>
+              {highlightFilters.map((highlight) => (
+                <Pressable
+                  accessibilityLabel={highlight ? `${highlight} highlights` : 'All highlight colors'}
+                  key={highlight ?? 'all'}
+                  onPress={() => setColor(highlight)}
+                  style={[
+                    styles.colorChip,
+                    highlight ? { backgroundColor: colors.highlight[highlight] } : null,
+                    color === highlight ? styles.colorChipActive : null,
+                  ]}
+                >
+                  {!highlight ? <Text style={styles.allColor}>ALL</Text> : null}
+                </Pressable>
+              ))}
+            </View>
+          </>
+        )}
+        renderItem={({ item }) => (
             <AnnotationCard
               annotation={item}
               deleting={deleteMutation.isPending && deleteMutation.variables?.verseKey === item.verseKey}
-              onDelete={confirmDelete}
-              onEdit={(annotation) => void editAnnotation(annotation)}
-            />
-          )}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
+              fontScale={readingFontSize.scale}
+            onDelete={confirmDelete}
+            onEdit={(annotation) => void editAnnotation(annotation)}
+          />
+        )}
+        showsVerticalScrollIndicator={false}
+      />
       <AnnotationEditor
         ayah={editorAyah}
         key={editorAyah ? `${editorAyah.verseKey}-${editorAyah.annotation?.updatedAt ?? 0}` : 'closed'}
@@ -210,11 +213,12 @@ export default function NotesScreen() {
 interface AnnotationCardProps {
   annotation: AnnotatedAyah;
   deleting: boolean;
+  fontScale?: number;
   onDelete: (annotation: AnnotatedAyah) => void;
   onEdit: (annotation: AnnotatedAyah) => void;
 }
 
-export function AnnotationCard({ annotation, deleting, onDelete, onEdit }: AnnotationCardProps) {
+export function AnnotationCard({ annotation, deleting, fontScale = 1, onDelete, onEdit }: AnnotationCardProps) {
   return (
     <View
       style={[
@@ -236,8 +240,8 @@ export function AnnotationCard({ annotation, deleting, onDelete, onEdit }: Annot
           <Text numberOfLines={1} style={styles.translationTitle}>{annotation.translationTitle}</Text>
           <Ionicons color={colors.gold} name="arrow-forward" size={18} />
         </View>
-        {annotation.noteText ? <Text style={styles.noteText}>{annotation.noteText}</Text> : null}
-        <Text numberOfLines={3} style={styles.verseText}>{annotation.translationText}</Text>
+        {annotation.noteText ? <Text style={[styles.noteText, { fontSize: 21 * fontScale, lineHeight: 26 * fontScale }]}>{annotation.noteText}</Text> : null}
+        <Text numberOfLines={3} style={[styles.verseText, { fontSize: 16 * fontScale, lineHeight: 21 * fontScale }]}>{annotation.translationText}</Text>
         <Text style={styles.updated}>Updated {new Date(annotation.updatedAt).toLocaleDateString()}</Text>
       </Pressable>
       <View style={styles.noteActions}>
@@ -286,10 +290,18 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.emerald, borderColor: colors.emerald },
   chipLabel: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 14 },
   chipLabelActive: { color: colors.paperLight },
-  colorRow: { flexDirection: 'row', gap: 11 },
+  colorRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    overflow: 'visible',
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
   list: { paddingBottom: 90 },
-  colorChip: { alignItems: 'center', borderColor: colors.border, borderRadius: 18, borderWidth: 2, height: 36, justifyContent: 'center', width: 36 },
-  colorChipActive: { borderColor: colors.emerald, transform: [{ scale: 1.1 }] },
+  colorChip: { alignItems: 'center', borderColor: colors.border, borderRadius: 20, borderWidth: 2, height: 40, justifyContent: 'center', width: 40 },
+  colorChipActive: { borderColor: colors.emerald, borderWidth: 4 },
   allColor: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 9 },
   noteCard: { backgroundColor: colors.paperLight, borderColor: colors.border, borderRadius: 3, borderWidth: 1, marginTop: 14, overflow: 'hidden' },
   noteContent: { padding: 16 },

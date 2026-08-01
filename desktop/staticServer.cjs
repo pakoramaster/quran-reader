@@ -43,6 +43,34 @@ function send(response, method, status, headers, body = '') {
   response.end(method === 'HEAD' ? undefined : body);
 }
 
+function sendJson(response, method, status, value) {
+  send(response, method, status, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify(value));
+}
+
+function readJsonBody(request, maximumBytes = 64 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let received = 0;
+    request.on('data', (chunk) => {
+      received += chunk.length;
+      if (received > maximumBytes) {
+        reject(new Error('Request body is too large.'));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on('end', () => {
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      } catch {
+        reject(new Error('Request body must be valid JSON.'));
+      }
+    });
+    request.on('error', reject);
+  });
+}
+
 function resolveRequestFile(webRoot, requestPath) {
   let relativePath;
   try {
@@ -66,16 +94,64 @@ function resolveRequestFile(webRoot, requestPath) {
   return { status: 404 };
 }
 
-function createRequestHandler(webRoot) {
-  return (request, response) => {
+function createRequestHandler(webRoot, ttsService = null) {
+  return async (request, response) => {
     setSecurityHeaders(response);
     const method = request.method || 'GET';
+    const requestUrl = new URL(request.url || '/', 'http://127.0.0.1');
+
+    if (requestUrl.pathname === '/api/tts/status') {
+      if (method !== 'GET' && method !== 'HEAD') {
+        send(response, method, 405, { Allow: 'GET, HEAD', 'Content-Type': 'text/plain; charset=utf-8' }, 'Method not allowed.');
+        return;
+      }
+      if (!ttsService) {
+        sendJson(response, method, 503, { ready: false, error: 'Standard voices are available in the Windows app.' });
+        return;
+      }
+      try {
+        if (requestUrl.searchParams.get('ensure') === '1') await ttsService.ensureModel();
+        sendJson(response, method, 200, { ready: ttsService.ready() });
+      } catch (error) {
+        sendJson(response, method, 500, { ready: false, error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
+
+    if (requestUrl.pathname === '/api/tts') {
+      if (method !== 'POST') {
+        send(response, method, 405, { Allow: 'POST', 'Content-Type': 'text/plain; charset=utf-8' }, 'Method not allowed.');
+        return;
+      }
+      if (!ttsService) {
+        send(response, method, 503, { 'Content-Type': 'text/plain; charset=utf-8' }, 'Standard voices are available in the Windows app.');
+        return;
+      }
+      try {
+        const body = await readJsonBody(request);
+        const text = typeof body?.text === 'string' ? body.text.trim() : '';
+        const speakerId = Number(body?.speakerId);
+        const speed = Number(body?.speed);
+        if (!text || text.length > 20_000) throw new Error('Translation text must contain between 1 and 20,000 characters.');
+        if (!Number.isInteger(speakerId) || speakerId < 0 || speakerId > 7) throw new Error('The selected standard voice is invalid.');
+        if (!Number.isFinite(speed) || speed < 0.5 || speed > 2) throw new Error('The selected speech speed is invalid.');
+        const wav = await ttsService.synthesize({ text, speakerId, speed });
+        send(response, method, 200, {
+          'Cache-Control': 'no-store',
+          'Content-Length': wav.length,
+          'Content-Type': 'audio/wav',
+        }, wav);
+      } catch (error) {
+        send(response, method, 400, { 'Content-Type': 'text/plain; charset=utf-8' }, error instanceof Error ? error.message : 'Translation speech failed.');
+      }
+      return;
+    }
+
     if (method !== 'GET' && method !== 'HEAD') {
       send(response, method, 405, { Allow: 'GET, HEAD', 'Content-Type': 'text/plain; charset=utf-8' }, 'Method not allowed.');
       return;
     }
 
-    const requestUrl = new URL(request.url || '/', 'http://127.0.0.1');
     const resolved = resolveRequestFile(webRoot, requestUrl.pathname);
     if (!resolved.filePath) {
       send(response, method, resolved.status, { 'Content-Type': 'text/plain; charset=utf-8' }, resolved.status === 400 ? 'Bad request.' : 'Not found.');
@@ -96,8 +172,9 @@ function createRequestHandler(webRoot) {
   };
 }
 
-function startStaticServer({ port, webRoot }) {
-  const server = http.createServer(createRequestHandler(path.resolve(webRoot)));
+function startStaticServer({ port, webRoot, dataRoot, ttsService }) {
+  const service = ttsService ?? (dataRoot ? require('./ttsServer.cjs').createTtsService(path.resolve(dataRoot)) : null);
+  const server = http.createServer(createRequestHandler(path.resolve(webRoot), service));
   return new Promise((resolve, reject) => {
     const handleError = (error) => {
       if (error?.code === 'EADDRINUSE') {
@@ -123,4 +200,4 @@ function startStaticServer({ port, webRoot }) {
   });
 }
 
-module.exports = { createRequestHandler, resolveRequestFile, startStaticServer };
+module.exports = { createRequestHandler, readJsonBody, resolveRequestFile, startStaticServer };

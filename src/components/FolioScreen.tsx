@@ -11,18 +11,18 @@ interface FolioScreenProps extends PropsWithChildren {
   scroll?: boolean;
   action?: ReactNode;
   contentStyle?: ViewStyle;
+  safeBottom?: boolean;
 }
 
-export function FolioScreen({
-  children,
-  eyebrow,
-  title,
-  subtitle,
-  scroll = true,
-  action,
-  contentStyle,
-}: FolioScreenProps) {
-  const header = title ? (
+interface FolioHeaderProps {
+  eyebrow?: string;
+  title: string;
+  subtitle?: string;
+  action?: ReactNode;
+}
+
+export function FolioHeader({ eyebrow, title, subtitle, action }: FolioHeaderProps) {
+  return (
     <View style={styles.header}>
       <View style={styles.rule} />
       {eyebrow ? <Text style={styles.eyebrow}>{eyebrow.toUpperCase()}</Text> : null}
@@ -34,10 +34,23 @@ export function FolioScreen({
         {action}
       </View>
     </View>
-  ) : null;
+  );
+}
+
+export function FolioScreen({
+  children,
+  eyebrow,
+  title,
+  subtitle,
+  scroll = true,
+  action,
+  contentStyle,
+  safeBottom = false,
+}: FolioScreenProps) {
+  const header = title ? <FolioHeader action={action} eyebrow={eyebrow} subtitle={subtitle} title={title} /> : null;
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeArea}>
+    <SafeAreaView edges={safeBottom ? ['top', 'bottom', 'left', 'right'] : ['top', 'left', 'right']} style={styles.safeArea}>
       <View pointerEvents="none" style={styles.watermark}>
         <View style={styles.watermarkRing} />
         <View style={[styles.watermarkRing, styles.watermarkRingInner]} />

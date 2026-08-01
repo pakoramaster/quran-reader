@@ -8,6 +8,7 @@ const icons = {
   index: ['book-outline', 'book'] as const,
   notes: ['bookmark-outline', 'bookmark'] as const,
   translations: ['library-outline', 'library'] as const,
+  recitation: ['headset-outline', 'headset'] as const,
   settings: ['options-outline', 'options'] as const,
 };
 
@@ -36,6 +37,7 @@ export default function TabsLayout() {
       })}
     >
       <Tabs.Screen name="index" options={{ title: 'Quran' }} />
+      <Tabs.Screen name="recitation" options={{ title: 'Recitation' }} />
       <Tabs.Screen name="notes" options={{ title: 'Notes' }} />
       <Tabs.Screen name="translations" options={{ title: 'Library' }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
