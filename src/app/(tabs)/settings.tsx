@@ -72,10 +72,13 @@ export default function SettingsScreen() {
     mutationFn: async () => {
       const archive = await createBackupArchive(userDb);
       const date = new Date(archive.summary.createdAt).toISOString().slice(0, 10);
-      await saveBackupFile(archive.bytes, `quran-folio-backup-${date}.quranfolio`);
-      return archive.summary;
+      const saved = await saveBackupFile(archive.bytes, `quran-folio-backup-${date}.quranfolio`);
+      return { saved, summary: archive.summary };
     },
     onError: (error) => showMessage('Backup could not be created', error instanceof Error ? error.message : 'The backup failed.'),
+    onSuccess: ({ saved }) => {
+      if (saved) showMessage('Backup saved', 'Your Quran Folio backup was saved successfully.');
+    },
   });
   const restore = useMutation({
     mutationFn: async (bytes: Uint8Array) => {

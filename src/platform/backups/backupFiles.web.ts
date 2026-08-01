@@ -1,6 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 
-export async function saveBackupFile(bytes: Uint8Array, fileName: string): Promise<void> {
+export async function saveBackupFile(bytes: Uint8Array, fileName: string): Promise<boolean> {
   const blob = new Blob([bytes.slice().buffer], { type: 'application/zip' });
   const uri = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
@@ -8,6 +8,7 @@ export async function saveBackupFile(bytes: Uint8Array, fileName: string): Promi
   anchor.download = fileName;
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(uri), 1_000);
+  return true;
 }
 
 export async function pickBackupFile(): Promise<Uint8Array | null> {

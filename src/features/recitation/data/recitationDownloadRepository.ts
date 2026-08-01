@@ -12,6 +12,26 @@ export interface RecitationDownload {
   downloadedAt: number;
 }
 
+export interface RecitationSurahDownloadPlan {
+  number: number;
+  ayahCount: number;
+}
+
+export interface ReciterDownloadProgress {
+  completedSurahs: number;
+  currentAyah: number;
+  currentSurahNumber: number;
+  currentSurahTotalAyahs: number;
+  skippedSurahs: number;
+  totalSurahs: number;
+}
+
+export interface ReciterDownloadResult {
+  downloadedSurahs: number;
+  skippedSurahs: number;
+  totalSurahs: number;
+}
+
 interface DownloadRow {
   reciter_id: ReciterId;
   surah_number: number;
@@ -69,6 +89,35 @@ export async function downloadSurahRecitation(
     downloadedAt,
   );
   return { reciterId, surahNumber, verseCount: verseKeys.length, byteCount, downloadedAt };
+}
+
+export async function downloadReciterRecitations(
+  db: SQLiteDatabase,
+  reciterId: ReciterId,
+  surahs: RecitationSurahDownloadPlan[],
+  onProgress?: (progress: ReciterDownloadProgress) => void,
+): Promise<ReciterDownloadResult> {
+  const existing = new Set((await listRecitationDownloads(db)).filter((item) => item.reciterId === reciterId).map((item) => item.surahNumber));
+  const pending = surahs.filter((surah) => !existing.has(surah.number));
+  const skippedSurahs = surahs.length - pending.length;
+  let downloadedSurahs = 0;
+
+  for (const surah of pending) {
+    const verseKeys = Array.from({ length: surah.ayahCount }, (_, index) => `${surah.number}:${index + 1}` as VerseKey);
+    await downloadSurahRecitation(db, reciterId, surah.number, verseKeys, (currentAyah, currentSurahTotalAyahs) => {
+      onProgress?.({
+        completedSurahs: skippedSurahs + downloadedSurahs,
+        currentAyah,
+        currentSurahNumber: surah.number,
+        currentSurahTotalAyahs,
+        skippedSurahs,
+        totalSurahs: surahs.length,
+      });
+    });
+    downloadedSurahs += 1;
+  }
+
+  return { downloadedSurahs, skippedSurahs, totalSurahs: surahs.length };
 }
 
 export async function removeSurahRecitation(db: SQLiteDatabase, reciterId: ReciterId, surahNumber: number): Promise<void> {

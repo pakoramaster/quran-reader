@@ -5,14 +5,17 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { FolioButton } from '@/components/FolioButton';
 import { FolioHeader, FolioScreen } from '@/components/FolioScreen';
 import { LoadingFolio } from '@/components/LoadingFolio';
 import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { listSurahs } from '@/features/quran-reader/data/quranRepository';
 import {
   downloadSurahRecitation,
+  downloadReciterRecitations,
   listRecitationDownloads,
   removeSurahRecitation,
+  type ReciterDownloadProgress,
 } from '@/features/recitation/data/recitationDownloadRepository';
 import { RECITERS, type ReciterId } from '@/features/recitation/domain/reciters';
 import { requestConfirmation, showMessage } from '@/platform/dialogs/dialogs';
@@ -32,12 +35,10 @@ export default function RecitationDownloadsScreen() {
   const queryClient = useQueryClient();
   const [reciterId, setReciterId] = useState<ReciterId>('husary');
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
+  const [allProgress, setAllProgress] = useState<(ReciterDownloadProgress & { reciterId: ReciterId }) | null>(null);
   const surahs = useQuery({ queryKey: ['surahs'], queryFn: () => listSurahs(quranDb), staleTime: Infinity });
   const downloads = useQuery({ queryKey: ['recitation-downloads'], queryFn: () => listRecitationDownloads(userDb) });
-  const downloadedBySurah = useMemo(
-    () => new Map(downloads.data?.filter((item) => item.reciterId === reciterId).map((item) => [item.surahNumber, item])),
-    [downloads.data, reciterId],
-  );
+  const downloadedBySurah = useMemo(() => new Map(downloads.data?.filter((item) => item.reciterId === reciterId).map((item) => [item.surahNumber, item])), [downloads.data, reciterId]);
   const download = useMutation({
     mutationFn: async ({ reciter, surah }: { reciter: ReciterId; surah: Surah }) => {
       const verseKeys = Array.from({ length: surah.ayahCount }, (_, index) => `${surah.number}:${index + 1}` as VerseKey);
@@ -57,15 +58,47 @@ export default function RecitationDownloadsScreen() {
     onError: (error) => showMessage('Could not remove download', error instanceof Error ? error.message : 'The stored audio could not be removed.'),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['recitation-downloads'] }),
   });
-  const totalBytes = downloads.data?.reduce((sum, item) => sum + item.byteCount, 0) ?? 0;
-
-  const confirmRemove = (surah: Surah) => requestConfirmation({
-    title: `Remove ${surah.nameTransliterated}?`,
-    message: 'The app will stream this recitation again when you play it online.',
-    confirmLabel: 'Remove download',
-    destructive: true,
-    onConfirm: () => remove.mutate({ reciter: reciterId, surahNumber: surah.number }),
+  const downloadAll = useMutation({
+    mutationFn: async ({ reciter, plans }: { reciter: ReciterId; plans: Surah[] }) =>
+      downloadReciterRecitations(userDb, reciter, plans, (next) => {
+        setAllProgress({ ...next, reciterId: reciter });
+        setProgress({ reciterId: reciter, surahNumber: next.currentSurahNumber, completed: next.currentAyah, total: next.currentSurahTotalAyahs });
+      }),
+    onError: (error) => showMessage('Download interrupted', `${error instanceof Error ? error.message : 'The reciter could not be downloaded.'} Completed Surahs remain saved; retry to continue.`),
+    onSuccess: ({ downloadedSurahs, skippedSurahs }) =>
+      showMessage(
+        downloadedSurahs ? 'Reciter downloaded' : 'Already downloaded',
+        downloadedSurahs ? `${downloadedSurahs} Surahs were downloaded. ${skippedSurahs} already-downloaded Surahs were skipped.` : 'Every Surah for this reciter is already available offline.',
+      ),
+    onSettled: async () => {
+      setAllProgress(null);
+      setProgress(null);
+      await queryClient.invalidateQueries({ queryKey: ['recitation-downloads'] });
+    },
   });
+  const totalBytes = downloads.data?.reduce((sum, item) => sum + item.byteCount, 0) ?? 0;
+  const remainingSurahs = Math.max(0, (surahs.data?.length ?? 0) - downloadedBySurah.size);
+  const busy = download.isPending || downloadAll.isPending || remove.isPending;
+
+  const confirmRemove = (surah: Surah) =>
+    requestConfirmation({
+      title: `Remove ${surah.nameTransliterated}?`,
+      message: 'The app will stream this recitation again when you play it online.',
+      confirmLabel: 'Remove download',
+      destructive: true,
+      onConfirm: () => remove.mutate({ reciter: reciterId, surahNumber: surah.number }),
+    });
+  const confirmDownloadAll = () => {
+    const plans = surahs.data ?? [];
+    const reciter = RECITERS.find((item) => item.id === reciterId);
+    if (!plans.length || !remainingSurahs || !reciter) return;
+    requestConfirmation({
+      title: `Download all ${reciter.name} recitations?`,
+      message: `${remainingSurahs} remaining Surahs will be downloaded. This can take a long time and use a large amount of storage. Already-downloaded Surahs will be skipped.`,
+      confirmLabel: 'Download all',
+      onConfirm: () => downloadAll.mutate({ reciter: reciterId, plans }),
+    });
+  };
 
   return (
     <FolioScreen contentStyle={styles.screen} safeBottom scroll={false}>
@@ -74,17 +107,23 @@ export default function RecitationDownloadsScreen() {
         data={surahs.data ?? []}
         keyExtractor={(item) => String(item.number)}
         ListEmptyComponent={surahs.isLoading ? <LoadingFolio label="Opening the Surah list…" /> : null}
-        ListHeaderComponent={(
+        ListHeaderComponent={
           <>
             <FolioHeader
-              action={<Pressable accessibilityLabel="Close downloads" onPress={() => router.back()} style={styles.close}><Ionicons color={colors.ink} name="close" size={24} /></Pressable>}
+              action={
+                <Pressable accessibilityLabel="Close downloads" onPress={() => router.back()} style={styles.close}>
+                  <Ionicons color={colors.ink} name="close" size={24} />
+                </Pressable>
+              }
               eyebrow="Listen without a connection"
-              subtitle="Choose a reciter, then save individual Surahs. Downloaded verses are used automatically before streaming."
+              subtitle="Choose a reciter, then save individual Surahs or the complete Quran. Downloaded verses are used automatically before streaming."
               title="Recitation downloads"
             />
             <View style={styles.summary}>
               <Text style={styles.summaryLabel}>OFFLINE AUDIO</Text>
-              <Text style={styles.summaryValue}>{downloads.data?.length ?? 0} Surahs · {formatBytes(totalBytes)}</Text>
+              <Text style={styles.summaryValue}>
+                {downloads.data?.length ?? 0} Surahs · {formatBytes(totalBytes)}
+              </Text>
             </View>
             <Text style={styles.pickerLabel}>RECITER</Text>
             <View style={styles.reciterPicker}>
@@ -94,6 +133,7 @@ export default function RecitationDownloadsScreen() {
                   <Pressable
                     accessibilityRole="radio"
                     accessibilityState={{ checked: selected }}
+                    disabled={busy}
                     key={reciter.id}
                     onPress={() => setReciterId(reciter.id)}
                     style={[styles.reciter, selected ? styles.reciterSelected : null]}
@@ -104,13 +144,24 @@ export default function RecitationDownloadsScreen() {
                 );
               })}
             </View>
+            <FolioButton
+              disabled={!remainingSurahs || busy || surahs.isLoading}
+              label={remainingSurahs ? `Download all · ${remainingSurahs} remaining` : 'All Surahs downloaded'}
+              loading={downloadAll.isPending}
+              onPress={confirmDownloadAll}
+              style={styles.downloadAll}
+            />
+            {allProgress?.reciterId === reciterId ? (
+              <Text style={styles.allProgress}>
+                {allProgress.completedSurahs} of {allProgress.totalSurahs} Surahs ready · Surah {allProgress.currentSurahNumber}, Ayah {allProgress.currentAyah} of {allProgress.currentSurahTotalAyahs}
+              </Text>
+            ) : null}
             <Text style={styles.pickerLabel}>SURAHS</Text>
           </>
-        )}
+        }
         renderItem={({ item }) => {
           const stored = downloadedBySurah.get(item.number);
           const activeProgress = progress?.reciterId === reciterId && progress.surahNumber === item.number ? progress : null;
-          const busy = download.isPending || remove.isPending;
           return (
             <View style={styles.surahRow}>
               <Text style={styles.surahNumber}>{item.number}</Text>
@@ -119,11 +170,15 @@ export default function RecitationDownloadsScreen() {
                 <Text style={styles.surahMeta}>
                   {activeProgress
                     ? `${activeProgress.completed} of ${activeProgress.total} Ayahs`
-                    : stored ? `${stored.verseCount} Ayahs · ${formatBytes(stored.byteCount)} stored` : `${item.ayahCount} Ayahs`}
+                    : stored
+                      ? `${stored.verseCount} Ayahs · ${formatBytes(stored.byteCount)} stored`
+                      : `${item.ayahCount} Ayahs`}
                 </Text>
               </View>
               {activeProgress ? (
-                <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.round((activeProgress.completed / activeProgress.total) * 100)}%` }]} /></View>
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${Math.round((activeProgress.completed / activeProgress.total) * 100)}%` }]} />
+                </View>
               ) : stored ? (
                 <Pressable accessibilityLabel={`Remove ${item.nameTransliterated} download`} disabled={busy} onPress={() => confirmRemove(item)} style={styles.rowAction}>
                   <Ionicons color={colors.oxblood} name="trash-outline" size={20} />
@@ -162,6 +217,8 @@ const styles = StyleSheet.create({
   reciterNameSelected: { color: colors.paperLight },
   reciterMeta: { color: colors.inkMuted, fontFamily: fontFamilies.body, fontSize: 13 },
   reciterMetaSelected: { color: colors.goldLight },
+  downloadAll: { marginBottom: 10 },
+  allProgress: { color: colors.inkMuted, fontFamily: fontFamilies.body, fontSize: 13, marginBottom: 10, textAlign: 'center' },
   surahRow: { alignItems: 'center', borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 12, minHeight: 66, paddingVertical: 9 },
   surahNumber: { color: colors.gold, fontFamily: fontFamilies.bodyBold, fontSize: 13, textAlign: 'center', width: 28 },
   surahCopy: { flex: 1 },
