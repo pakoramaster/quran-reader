@@ -1,4 +1,5 @@
 import { getVoiceProfile, type VoiceProfileId } from '@/features/speech/domain/voiceProfiles';
+import { clampTtsSpeed } from '@/features/speech/domain/ttsSpeeds';
 
 export const UNIFORM_TTS_MODEL_ID = 'kitten-nano-en-v0_1-fp16';
 
@@ -39,10 +40,10 @@ export async function ensureUniformVoiceModel(onProgress?: (progress: UniformVoi
   return UNIFORM_TTS_MODEL_ID;
 }
 
-export async function synthesizeUniformSpeech(text: string, profileId: VoiceProfileId): Promise<string> {
+export async function synthesizeUniformSpeech(text: string, profileId: VoiceProfileId, speed = 1): Promise<string> {
   const profile = getVoiceProfile(profileId);
   const response = await fetch('/api/tts', {
-    body: JSON.stringify({ text, speakerId: profile.speakerId, speed: profile.rate }),
+    body: JSON.stringify({ text, speakerId: profile.speakerId, speed: clampTtsSpeed(speed) }),
     headers: { 'Content-Type': 'application/json' },
     method: 'POST',
   });

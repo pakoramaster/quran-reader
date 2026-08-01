@@ -16,7 +16,8 @@ import { DEFAULT_RECITER_ID, getReciter, isReciterId, RECITERS, type PlaybackMod
 import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
 import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
-import { DEFAULT_VOICE_PROFILE_ID, getVoiceProfile, isVoiceProfileId } from '@/features/speech/domain/voiceProfiles';
+import { DEFAULT_VOICE_PROFILE_ID, isVoiceProfileId } from '@/features/speech/domain/voiceProfiles';
+import { getTtsSpeed, isTtsSpeedId } from '@/features/speech/domain/ttsSpeeds';
 import {
   getActiveTranslationId,
   getTranslation,
@@ -68,6 +69,7 @@ export default function SurahReaderScreen() {
     queryKey: ['speech-settings', activeTranslation.data?.language],
     queryFn: async () => ({
       profile: await getSetting(userDb, 'tts_voice_profile'),
+      speed: await getSetting(userDb, 'tts_speed'),
     }),
     enabled: Boolean(activeTranslation.data?.language),
   });
@@ -81,7 +83,7 @@ export default function SurahReaderScreen() {
   const storedReciter = playbackSettings.data?.reciter ?? null;
   const reciterId = reciterIdOverride ?? (isReciterId(storedReciter) ? storedReciter : DEFAULT_RECITER_ID);
   const voiceProfileId = isVoiceProfileId(speechSettings.data?.profile) ? speechSettings.data.profile : DEFAULT_VOICE_PROFILE_ID;
-  const voiceProfile = getVoiceProfile(voiceProfileId);
+  const voiceSpeed = getTtsSpeed(isTtsSpeedId(speechSettings.data?.speed) ? speechSettings.data.speed : null);
   const annotations = useQuery({
     queryKey: ['annotations', surahNumber],
     queryFn: () => listAnnotationsForSurah(userDb, surahNumber),
@@ -163,7 +165,7 @@ export default function SurahReaderScreen() {
       reciterId,
       activeTranslation.data?.language,
       voiceProfileId,
-      voiceProfile.rate,
+      voiceSpeed.value,
       1,
     );
   };
@@ -297,7 +299,7 @@ export default function SurahReaderScreen() {
                         reciterId,
                         activeTranslation.data?.language,
                         voiceProfileId,
-                        voiceProfile.rate,
+                        voiceSpeed.value,
                         1,
                       );
                     }}

@@ -2,7 +2,7 @@ import path from 'node:path';
 
 // The Electron voice service remains CommonJS so it can run without transpilation.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { encodeWav, generationRequest, resolveArchiveTarget } = require('../../desktop/ttsServer.cjs');
+const { encodeWav, generationRequest, prepareTtsChunks, resolveArchiveTarget } = require('../../desktop/ttsServer.cjs');
 
 describe('desktop uniform voice service', () => {
   it('encodes generated floating-point samples as a valid mono PCM WAV', () => {
@@ -34,5 +34,13 @@ describe('desktop uniform voice service', () => {
       speed: 0.9,
       text: 'A standard voice.',
     });
+  });
+
+  it('uses the same natural sentence boundaries as the native engine', () => {
+    expect(prepareTtsChunks('Dr. Smith listened. Mercy—compassion…always')).toEqual([
+      'Dr. Smith listened.',
+      'Mercy, compassion...',
+      'always.',
+    ]);
   });
 });

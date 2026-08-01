@@ -14,6 +14,7 @@ import { type PlaybackMode, type ReciterId } from '@/features/recitation/domain/
 import { releaseDownloadedRecitationUri } from '@/features/recitation/data/recitationFileStore';
 import { resolveRecitationPlaybackSource } from '@/features/recitation/data/recitationPlaybackSource';
 import { releaseUniformSpeechUri, synthesizeUniformSpeech } from '@/features/speech/data/uniformTtsEngine';
+import { getTtsSpeed } from '@/features/speech/domain/ttsSpeeds';
 import { DEFAULT_VOICE_PROFILE_ID, type VoiceProfileId } from '@/features/speech/domain/voiceProfiles';
 import type { TranslationVerse, VerseKey } from '@/types/domain';
 
@@ -62,6 +63,17 @@ interface QueueConfig {
   repeats: PlaybackRepeats;
 }
 
+interface TranslationSynthesisResult {
+  uri: string | null;
+  error: unknown | null;
+}
+
+interface TranslationPrefetch {
+  index: number;
+  session: number;
+  result: Promise<TranslationSynthesisResult>;
+}
+
 const initialState: SpeechState = {
   status: 'idle',
   currentVerseKey: null,
@@ -74,6 +86,12 @@ const SpeechContext = createContext<SpeechContextValue | null>(null);
 
 function setPlayerVolume(player: { volume: number }, volume: number) {
   player.volume = volume;
+}
+
+function synthesizeTranslation(queue: QueueConfig, verse: PlaybackVerse): Promise<TranslationSynthesisResult> {
+  return synthesizeUniformSpeech(verse.text, queue.voice, queue.rate)
+    .then((uri) => ({ uri, error: null }))
+    .catch((error: unknown) => ({ uri: null, error }));
 }
 
 export function SpeechProvider({ children }: PropsWithChildren) {
@@ -95,6 +113,28 @@ export function SpeechProvider({ children }: PropsWithChildren) {
   const advanceRef = useRef<(session: number) => void>(() => undefined);
   const localAudioUriRef = useRef<string | null>(null);
   const translationAudioUriRef = useRef<string | null>(null);
+  const translationPrefetchRef = useRef<TranslationPrefetch | null>(null);
+
+  const discardTranslationPrefetch = useCallback(() => {
+    const prefetched = translationPrefetchRef.current;
+    translationPrefetchRef.current = null;
+    if (prefetched) {
+      void prefetched.result.then(({ uri }) => {
+        if (uri) releaseUniformSpeechUri(uri);
+      });
+    }
+  }, []);
+
+  const prefetchTranslation = useCallback((index: number, session: number, queue: QueueConfig, verse: PlaybackVerse) => {
+    const current = translationPrefetchRef.current;
+    if (current?.index === index && current.session === session) return;
+    discardTranslationPrefetch();
+    translationPrefetchRef.current = {
+      index,
+      session,
+      result: synthesizeTranslation(queue, verse),
+    };
+  }, [discardTranslationPrefetch]);
 
   const beginTranslation = useCallback((index: number, session: number) => {
     const queue = queueRef.current;
@@ -111,7 +151,14 @@ export function SpeechProvider({ children }: PropsWithChildren) {
       rangeRepeat: queue.repeats.range,
     });
     setPlayerVolume(player, queue.volume);
-    void synthesizeUniformSpeech(verse.text, queue.voice).then((uri) => {
+    const prefetched = translationPrefetchRef.current;
+    const synthesis = prefetched?.index === index && prefetched.session === session
+      ? prefetched.result
+      : synthesizeTranslation(queue, verse);
+    if (prefetched?.index === index && prefetched.session === session) translationPrefetchRef.current = null;
+    else discardTranslationPrefetch();
+    void synthesis.then(({ uri, error }) => {
+      if (!uri) throw error instanceof Error ? error : new Error('Translation speech failed.');
       if (session !== sessionRef.current) {
         releaseUniformSpeechUri(uri);
         return;
@@ -132,7 +179,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
         rangeRepeat: queue.repeats.range,
       });
     });
-  }, [player]);
+  }, [discardTranslationPrefetch, player]);
 
   const beginRecitation = useCallback((index: number, session: number) => {
     const queue = queueRef.current;
@@ -160,8 +207,9 @@ export function SpeechProvider({ children }: PropsWithChildren) {
       readySessionRef.current = session;
       if (pausedRef.current) setState((current) => ({ ...current, status: 'paused' }));
       else player.play();
+      if (queue.mode === 'both') prefetchTranslation(index, session, queue, verse);
     });
-  }, [player]);
+  }, [player, prefetchTranslation]);
 
   const beginAt = useCallback((index: number, session: number) => {
     const queue = queueRef.current;
@@ -200,6 +248,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     if (!phaseRef.current) return;
     if (playerStatus.error) {
+      if (phaseRef.current === 'recitation') discardTranslationPrefetch();
       // Audio status is an external native event reflected into React state.
       setState((current) => ({
         ...current,
@@ -214,13 +263,14 @@ export function SpeechProvider({ children }: PropsWithChildren) {
       // Audio status is an external native event reflected into React state.
       setState((current) => ({ ...current, status: 'speaking', error: null }));
     }
-  }, [playerStatus.didJustFinish, playerStatus.error, playerStatus.playing]);
+  }, [discardTranslationPrefetch, playerStatus.didJustFinish, playerStatus.error, playerStatus.playing]);
 
   useEffect(() => {
     void setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'doNotMix', shouldPlayInBackground: true });
   }, []);
 
-  const play = useCallback((verses: PlaybackVerse[], mode: PlaybackMode, reciterId: ReciterId, language = 'en', voice: VoiceProfileId = DEFAULT_VOICE_PROFILE_ID, rate = 0.9, pitch = 1, volume = 1, repeats: PlaybackRepeats = { range: 1, ayah: 1 }) => {
+  const play = useCallback((verses: PlaybackVerse[], mode: PlaybackMode, reciterId: ReciterId, language = 'en', voice: VoiceProfileId = DEFAULT_VOICE_PROFILE_ID, rate = getTtsSpeed(null).value, pitch = 1, volume = 1, repeats: PlaybackRepeats = { range: 1, ayah: 1 }) => {
+    discardTranslationPrefetch();
     sessionRef.current += 1;
     pausedRef.current = false;
     readySessionRef.current = 0;
@@ -244,7 +294,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     ayahRunRef.current = 1;
     rangeRunRef.current = 1;
     beginAt(indexRef.current, sessionRef.current);
-  }, [beginAt, player]);
+  }, [beginAt, discardTranslationPrefetch, player]);
 
   const speakSurah = useCallback((verses: TranslationVerse[], language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => {
     play(verses, 'translation', 'husary', language, voice, rate, pitch, volume);
@@ -260,6 +310,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
   }, [player]);
 
   const stop = useCallback(async () => {
+    discardTranslationPrefetch();
     sessionRef.current += 1;
     pausedRef.current = false;
     readySessionRef.current = 0;
@@ -271,7 +322,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     if (translationAudioUriRef.current) releaseUniformSpeechUri(translationAudioUriRef.current);
     translationAudioUriRef.current = null;
     setState((current) => ({ ...current, status: 'idle', phase: null, error: null }));
-  }, [player]);
+  }, [discardTranslationPrefetch, player]);
   const reset = useCallback(async () => { await stop(); indexRef.current = 0; setState(initialState); }, [stop]);
 
   const pause = useCallback(async () => {
@@ -293,10 +344,11 @@ export function SpeechProvider({ children }: PropsWithChildren) {
   }, [player, state.status]);
 
   useEffect(() => () => {
+    discardTranslationPrefetch();
     player.pause();
     if (localAudioUriRef.current) releaseDownloadedRecitationUri(localAudioUriRef.current);
     if (translationAudioUriRef.current) releaseUniformSpeechUri(translationAudioUriRef.current);
-  }, [player]);
+  }, [discardTranslationPrefetch, player]);
 
   const value = useMemo(() => ({ ...state, speakAyah, speakSurah, play, pause, resume, setVolume, stop, reset }), [pause, play, reset, resume, setVolume, speakAyah, speakSurah, state, stop]);
   return <SpeechContext.Provider value={value}>{children}</SpeechContext.Provider>;

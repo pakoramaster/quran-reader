@@ -15,9 +15,9 @@ import { useReadingFontSize } from '@/features/settings/application/useReadingFo
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
 import {
   DEFAULT_VOICE_PROFILE_ID,
-  getVoiceProfile,
   isVoiceProfileId,
 } from '@/features/speech/domain/voiceProfiles';
+import { getTtsSpeed, isTtsSpeedId } from '@/features/speech/domain/ttsSpeeds';
 import { listTranslations, listTranslationVersesInRange } from '@/features/translations/data/translationRepository';
 import { colors, fontFamilies, spacing } from '@/theme/tokens';
 import type { VerseKey } from '@/types/domain';
@@ -114,6 +114,7 @@ export default function RecitationScreen() {
       ayahRepeat: await getSetting(userDb, keys.ayahRepeat),
       volume: await getSetting(userDb, keys.volume),
       voiceProfile: await getSetting(userDb, 'tts_voice_profile'),
+      voiceSpeed: await getSetting(userDb, 'tts_speed'),
     }),
   });
 
@@ -133,7 +134,7 @@ export default function RecitationScreen() {
   const ayahRepeat = ayahRepeatOverride ?? bounded(stored.data?.ayahRepeat ?? null, 1, 1, 20);
   const volume = volumeOverride ?? bounded(stored.data?.volume ?? null, 0.8, 0, 1);
   const voiceProfileId = isVoiceProfileId(stored.data?.voiceProfile) ? stored.data.voiceProfile : DEFAULT_VOICE_PROFILE_ID;
-  const voiceProfile = getVoiceProfile(voiceProfileId);
+  const voiceSpeed = getTtsSpeed(isTtsSpeedId(stored.data?.voiceSpeed) ? stored.data.voiceSpeed : null);
   const startName = surahs.data?.[startSurah - 1]?.nameTransliterated ?? `Surah ${startSurah}`;
   const endName = surahs.data?.[endSurah - 1]?.nameTransliterated ?? `Surah ${endSurah}`;
   const hasSource = Boolean(reciterId || translation);
@@ -227,7 +228,7 @@ export default function RecitationScreen() {
       reciterId ?? DEFAULT_RECITER_ID,
       translation?.language,
       voiceProfileId,
-      voiceProfile.rate,
+      voiceSpeed.value,
       1,
       volume,
       { range: rangeRepeat, ayah: ayahRepeat, startAt },

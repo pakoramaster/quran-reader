@@ -39,6 +39,7 @@ function sourceDatabase() {
     }];
     if (sql.includes('FROM app_settings')) return [
       { key: 'reading_font_size', value: 'large' },
+      { key: 'tts_speed', value: 'fast' },
       { key: 'tts_voice_profile', value: 'calm' },
     ];
     if (sql.startsWith('SELECT * FROM recitation_downloads')) return [{
@@ -66,6 +67,7 @@ describe('backup and restore repository', () => {
     expect(backup.annotations[0]?.noteText).toBe('A reflection');
     expect(backup.settings).toEqual(expect.arrayContaining([
       { key: 'reading_font_size', value: 'large' },
+      { key: 'tts_speed', value: 'fast' },
       { key: 'tts_voice_profile', value: 'calm' },
     ]));
     expect(Array.from(files['recitations/husary/1/1.mp3'] ?? [])).toEqual([1, 2]);

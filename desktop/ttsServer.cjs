@@ -7,6 +7,55 @@ const unbzip2 = require('unbzip2-stream');
 
 const modelId = 'kitten-nano-en-v0_1-fp16';
 const modelUrl = `https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${modelId}.tar.bz2`;
+const abbreviationEnd = /\b(?:dr|mr|mrs|ms|prof|sr|jr|st|vs|etc)\.$/i;
+
+function normalizeTtsText(text) {
+  const normalized = String(text)
+    .normalize('NFKC')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/\u2026/g, '...')
+    .replace(/\s*[\u2013\u2014]\s*/g, ', ')
+    .replace(/\s+/g, ' ')
+    .replace(/([,;:!?])(?=[A-Za-z])/g, '$1 ')
+    .trim();
+  if (!normalized) return '';
+  return /[.!?]["']?$/.test(normalized) ? normalized : `${normalized}.`;
+}
+
+function splitLongSentence(sentence, maxLength) {
+  const chunks = [];
+  let remainder = sentence.trim();
+  while (remainder.length > maxLength) {
+    const window = remainder.slice(0, maxLength + 1);
+    const minimumCut = Math.floor(maxLength * 0.55);
+    const punctuationCut = Math.max(window.lastIndexOf('; '), window.lastIndexOf(': '), window.lastIndexOf(', '));
+    const whitespaceCut = window.lastIndexOf(' ');
+    const cut = punctuationCut >= minimumCut ? punctuationCut + 1 : whitespaceCut >= minimumCut ? whitespaceCut : maxLength;
+    const chunk = remainder.slice(0, cut).trim();
+    chunks.push(/[.!?;:,]["']?$/.test(chunk) ? chunk : `${chunk},`);
+    remainder = remainder.slice(cut).trim();
+  }
+  if (remainder) chunks.push(remainder);
+  return chunks;
+}
+
+function prepareTtsChunks(text, maxLength = 220) {
+  const normalized = normalizeTtsText(text);
+  if (!normalized) return [];
+  const matches = normalized.match(/[^.!?]+(?:[.!?]+["']?|$)/g) || [normalized];
+  const sentences = [];
+  for (const match of matches) {
+    const sentence = match.trim();
+    if (!sentence) continue;
+    if (sentences.length && abbreviationEnd.test(sentences[sentences.length - 1])) {
+      sentences[sentences.length - 1] = `${sentences[sentences.length - 1]} ${sentence}`;
+    } else {
+      sentences.push(sentence);
+    }
+  }
+  return sentences.flatMap((sentence) => splitLongSentence(sentence, Math.max(80, maxLength)));
+}
 
 function modelFiles(modelRoot) {
   return {
@@ -123,10 +172,28 @@ function createTtsService(dataRoot) {
       const tts = await engine();
       // Electron 21+ does not permit Node-API external buffers. Asking Sherpa
       // for an owned buffer keeps the same samples while remaining compatible.
-      const audio = await tts.generateAsync(generationRequest(text, speakerId, speed));
-      return encodeWav(audio.samples, audio.sampleRate);
+      const chunks = prepareTtsChunks(text);
+      if (!chunks.length) throw new Error('Translation speech text is empty.');
+      const generated = [];
+      let sampleRate = 0;
+      let sampleCount = 0;
+      for (const chunk of chunks) {
+        const audio = await tts.generateAsync(generationRequest(chunk, speakerId, speed));
+        if (!sampleRate) sampleRate = audio.sampleRate;
+        const pauseLength = generated.length ? Math.round(sampleRate * 0.12) : 0;
+        generated.push({ samples: audio.samples, pauseLength });
+        sampleCount += pauseLength + audio.samples.length;
+      }
+      const samples = new Float32Array(sampleCount);
+      let offset = 0;
+      for (const audio of generated) {
+        offset += audio.pauseLength;
+        samples.set(audio.samples, offset);
+        offset += audio.samples.length;
+      }
+      return encodeWav(samples, sampleRate);
     },
   };
 }
 
-module.exports = { createTtsService, encodeWav, extractTarBz2, generationRequest, isReady, resolveArchiveTarget };
+module.exports = { createTtsService, encodeWav, extractTarBz2, generationRequest, isReady, normalizeTtsText, prepareTtsChunks, resolveArchiveTarget };

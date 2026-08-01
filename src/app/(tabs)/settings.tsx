@@ -24,10 +24,15 @@ import {
 } from '@/features/speech/data/uniformTtsEngine';
 import {
   DEFAULT_VOICE_PROFILE_ID,
-  getVoiceProfile,
   isVoiceProfileId,
   VOICE_PROFILES,
 } from '@/features/speech/domain/voiceProfiles';
+import {
+  DEFAULT_TTS_SPEED_ID,
+  getTtsSpeed,
+  isTtsSpeedId,
+  TTS_SPEEDS,
+} from '@/features/speech/domain/ttsSpeeds';
 import { getActiveTranslationId, getTranslation } from '@/features/translations/data/translationRepository';
 import { pickBackupFile, saveBackupFile } from '@/platform/backups/backupFiles';
 import { requestConfirmation, showMessage } from '@/platform/dialogs/dialogs';
@@ -52,6 +57,7 @@ export default function SettingsScreen() {
     queryKey: ['speech-settings', activeTranslation.data?.language],
     queryFn: async () => ({
       profile: await getSetting(userDb, 'tts_voice_profile'),
+      speed: await getSetting(userDb, 'tts_speed'),
     }),
     enabled: Boolean(activeTranslation.data?.language),
   });
@@ -71,9 +77,16 @@ export default function SettingsScreen() {
   });
   const save = useMutation({
     mutationFn: ({ key, value }: { key: string; value: string }) => setSetting(userDb, key, value),
-    onSuccess: (_result, variables) => queryClient.invalidateQueries({
-      queryKey: [variables.key === 'reading_font_size' ? 'reading-font-size' : 'speech-settings'],
-    }),
+    onSuccess: async (_result, variables) => {
+      if (variables.key === 'reading_font_size') {
+        await queryClient.invalidateQueries({ queryKey: ['reading-font-size'] });
+        return;
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['speech-settings'] }),
+        queryClient.invalidateQueries({ queryKey: ['recitation-player-settings'] }),
+      ]);
+    },
   });
   const backup = useMutation({
     mutationFn: async () => {
@@ -115,7 +128,10 @@ export default function SettingsScreen() {
   const selectedProfileId = isVoiceProfileId(speechSettings.data?.profile)
     ? speechSettings.data.profile
     : DEFAULT_VOICE_PROFILE_ID;
-  const selectedProfile = getVoiceProfile(selectedProfileId);
+  const selectedSpeedId = isTtsSpeedId(speechSettings.data?.speed)
+    ? speechSettings.data.speed
+    : DEFAULT_TTS_SPEED_ID;
+  const selectedSpeed = getTtsSpeed(selectedSpeedId);
   const selectedReadingFontSize = isReadingFontSizeId(readingFontSize.data)
     ? readingFontSize.data
     : DEFAULT_READING_FONT_SIZE_ID;
@@ -130,7 +146,7 @@ export default function SettingsScreen() {
         { key: '1:1', text: 'This translation is ready for offline reading.' },
         activeTranslation.data?.language ?? 'en',
         selectedProfileId,
-        selectedProfile.rate,
+        selectedSpeed.value,
         1,
       );
     } catch (error) {
@@ -184,6 +200,25 @@ export default function SettingsScreen() {
                   <View style={styles.optionCopy}>
                     <Text style={styles.optionTitle}>{profile.name}</Text>
                     <Text style={styles.optionMeta}>{profile.description}</Text>
+                  </View>
+                  {selected ? <Ionicons color={colors.emerald} name="checkmark-circle" size={21} /> : null}
+                </Pressable>
+              );
+            })}
+            <Text style={styles.preferenceLabel}>Translation speech speed</Text>
+            {TTS_SPEEDS.map((speed) => {
+              const selected = selectedSpeedId === speed.id;
+              return (
+                <Pressable
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selected }}
+                  key={speed.id}
+                  onPress={() => save.mutate({ key: 'tts_speed', value: speed.id })}
+                  style={[styles.optionRow, selected ? styles.optionSelected : null]}
+                >
+                  <View style={styles.optionCopy}>
+                    <Text style={styles.optionTitle}>{speed.label}</Text>
+                    <Text style={styles.optionMeta}>{speed.description}</Text>
                   </View>
                   {selected ? <Ionicons color={colors.emerald} name="checkmark-circle" size={21} /> : null}
                 </Pressable>
@@ -265,6 +300,7 @@ const styles = StyleSheet.create({
   optionCopy: { flex: 1 },
   optionTitle: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 16 },
   optionMeta: { color: colors.inkMuted, fontFamily: fontFamilies.body, fontSize: 14 },
+  preferenceLabel: { color: colors.gold, fontFamily: fontFamilies.bodyBold, fontSize: 10, letterSpacing: 1.3, marginTop: 18, paddingBottom: 5, textTransform: 'uppercase' },
   warning: { backgroundColor: '#F4E5D1', color: colors.oxblood, fontFamily: fontFamilies.body, fontSize: 16, lineHeight: 21, marginTop: 12, padding: 12 },
   ready: { color: colors.emerald, fontFamily: fontFamilies.bodyBold, fontSize: 14, marginTop: 14 },
   testButton: { marginTop: 16 },
