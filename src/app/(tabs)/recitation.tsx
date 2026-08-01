@@ -13,10 +13,8 @@ import { CompactVolumeControl } from '@/features/recitation/ui/CompactVolumeCont
 import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
 import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
-import {
-  DEFAULT_VOICE_PROFILE_ID,
-  isVoiceProfileId,
-} from '@/features/speech/domain/voiceProfiles';
+import { primeUniformSpeech } from '@/features/speech/data/uniformTtsEngine';
+import { DEFAULT_VOICE_PROFILE_ID, isVoiceProfileId } from '@/features/speech/domain/voiceProfiles';
 import { getTtsSpeed, isTtsSpeedId } from '@/features/speech/domain/ttsSpeeds';
 import { listTranslations, listTranslationVersesInRange } from '@/features/translations/data/translationRepository';
 import { colors, fontFamilies, spacing } from '@/theme/tokens';
@@ -118,15 +116,16 @@ export default function RecitationScreen() {
     }),
   });
 
-  useEffect(() => () => {
-    if (volumeSaveTimerRef.current) clearTimeout(volumeSaveTimerRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (volumeSaveTimerRef.current) clearTimeout(volumeSaveTimerRef.current);
+    },
+    [],
+  );
 
   const storedReciter = stored.data?.reciter ?? null;
-  const reciterId: ReciterId | null = reciterOverride !== undefined
-    ? reciterOverride
-    : isReciterId(storedReciter) ? storedReciter : null;
-  const requestedTranslationId = translationOverride !== undefined ? translationOverride : stored.data?.translation ?? null;
+  const reciterId: ReciterId | null = reciterOverride !== undefined ? reciterOverride : isReciterId(storedReciter) ? storedReciter : null;
+  const requestedTranslationId = translationOverride !== undefined ? translationOverride : (stored.data?.translation ?? null);
   const translation = translations.data?.find((item) => item.id === requestedTranslationId) ?? null;
   const startSurah = startOverride ?? bounded(stored.data?.start ?? null, 1, 1, 114);
   const endSurah = Math.max(startSurah, endOverride ?? bounded(stored.data?.end ?? null, startSurah, 1, 114));
@@ -159,26 +158,35 @@ export default function RecitationScreen() {
       translation: translatedByKey.get(ayah.verseKey) ?? null,
     }));
   }, [rangeAyahs.data, rangeTranslation.data]);
-  const selectedIndex = Math.max(0, playbackRows.findIndex((verse) => verse.key === selectedVerseKey));
+  const selectedIndex = Math.max(
+    0,
+    playbackRows.findIndex((verse) => verse.key === selectedVerseKey),
+  );
+
+  useEffect(() => {
+    if (!translation) return undefined;
+    const controller = new AbortController();
+    const texts = playbackRows.slice(selectedIndex, selectedIndex + 3).flatMap((verse) => (verse.translation ? [verse.translation] : []));
+    void primeUniformSpeech(texts, voiceProfileId, voiceSpeed.value, controller.signal).catch(() => undefined);
+    return () => controller.abort();
+  }, [playbackRows, selectedIndex, translation, voiceProfileId, voiceSpeed.value]);
   const currentIndex = playbackRows.findIndex((verse) => verse.key === speech.currentVerseKey);
-  const currentSurahNumber = currentIndex >= 0 ? playbackRows[currentIndex]?.surahNumber ?? null : null;
-  const visibleSurahDistance = currentSurahNumber === null || visibleSurahs === null
-    ? 0
-    : currentSurahNumber < visibleSurahs.first
-      ? visibleSurahs.first - currentSurahNumber
-      : currentSurahNumber > visibleSurahs.last
-        ? currentSurahNumber - visibleSurahs.last
-        : 0;
-  const showFollowPrompt = !followingPlayback
-    && currentIndex >= 0
-    && speech.status !== 'idle'
-    && visibleSurahDistance >= 5;
+  const currentSurahNumber = currentIndex >= 0 ? (playbackRows[currentIndex]?.surahNumber ?? null) : null;
+  const visibleSurahDistance =
+    currentSurahNumber === null || visibleSurahs === null
+      ? 0
+      : currentSurahNumber < visibleSurahs.first
+        ? visibleSurahs.first - currentSurahNumber
+        : currentSurahNumber > visibleSurahs.last
+          ? currentSurahNumber - visibleSurahs.last
+          : 0;
+  const showFollowPrompt = !followingPlayback && currentIndex >= 0 && speech.status !== 'idle' && visibleSurahDistance >= 5;
   const versesLoading = rangeAyahs.isLoading || (Boolean(translation) && rangeTranslation.isLoading);
   const handleViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken<PlaybackRow>[] }) => {
-    const numbers = viewableItems.flatMap((token) => token.item?.surahNumber ? [token.item.surahNumber] : []);
+    const numbers = viewableItems.flatMap((token) => (token.item?.surahNumber ? [token.item.surahNumber] : []));
     if (!numbers.length) return;
     const next = { first: Math.min(...numbers), last: Math.max(...numbers) };
-    setVisibleSurahs((current) => current?.first === next.first && current.last === next.last ? current : next);
+    setVisibleSurahs((current) => (current?.first === next.first && current.last === next.last ? current : next));
   }, []);
 
   useEffect(() => {
@@ -186,8 +194,12 @@ export default function RecitationScreen() {
     verseListRef.current?.scrollToIndex({ animated: true, index: currentIndex, viewPosition: 0.42 });
   }, [currentIndex, followingPlayback, speech.status]);
 
-  const stopForChange = () => { if (speech.status !== 'idle') void speech.stop(); };
-  const persistNumber = (key: string, value: number) => { void setSetting(userDb, key, String(value)); };
+  const stopForChange = () => {
+    if (speech.status !== 'idle') void speech.stop();
+  };
+  const persistNumber = (key: string, value: number) => {
+    void setSetting(userDb, key, String(value));
+  };
   const changeVolume = (value: number) => {
     const next = Math.max(0, Math.min(1, value));
     setVolumeOverride(next);
@@ -210,7 +222,10 @@ export default function RecitationScreen() {
     stopForChange();
     setStartOverride(next);
     persistNumber(keys.start, next);
-    if (next > endSurah) { setEndOverride(next); persistNumber(keys.end, next); }
+    if (next > endSurah) {
+      setEndOverride(next);
+      persistNumber(keys.end, next);
+    }
   };
   const changeEnd = (value: number) => {
     const next = Math.max(startSurah, Math.min(114, value));
@@ -244,10 +259,8 @@ export default function RecitationScreen() {
     if (speech.status !== 'idle') beginPlayback(index);
   };
 
-  const sourceLabel = reciterId && translation
-    ? `${getReciter(reciterId).name} · ${translation.title}`
-    : reciterId ? getReciter(reciterId).name
-    : translation?.title ?? 'Choose a reciter or translation';
+  const sourceLabel =
+    reciterId && translation ? `${getReciter(reciterId).name} · ${translation.title}` : reciterId ? getReciter(reciterId).name : (translation?.title ?? 'Choose a reciter or translation');
   const stopControl = (
     <Pressable accessibilityLabel="Stop" disabled={speech.status === 'idle'} onPress={() => void speech.stop()} style={[styles.compactControl, speech.status === 'idle' ? styles.disabled : null]}>
       <Ionicons color={colors.oxblood} name="stop" size={19} />
@@ -257,23 +270,24 @@ export default function RecitationScreen() {
     <Pressable
       accessibilityLabel={speech.status === 'paused' ? 'Resume' : isActive ? 'Pause' : 'Play'}
       disabled={!hasSource || versesLoading || !playbackRows.length}
-      onPress={() => speech.status === 'paused' ? void speech.resume() : isActive ? void speech.pause() : void beginPlayback()}
+      onPress={() => (speech.status === 'paused' ? void speech.resume() : isActive ? void speech.pause() : void beginPlayback())}
       style={[styles.compactPlayControl, !hasSource || versesLoading || !playbackRows.length ? styles.disabled : null]}
     >
-      {versesLoading || speech.status === 'loading'
-        ? <ActivityIndicator color={colors.paperLight} size="small" />
-        : <Ionicons color={colors.paperLight} name={isActive ? 'pause' : 'play'} size={23} />}
+      {versesLoading || speech.status === 'loading' ? (
+        <ActivityIndicator color={colors.paperLight} size="small" />
+      ) : (
+        <Ionicons color={colors.paperLight} name={isActive ? 'pause' : 'play'} size={23} />
+      )}
     </Pressable>
   );
   const statusControl = (
     <View style={[styles.controllerStatus, Platform.OS !== 'web' ? styles.controllerStatusMobile : null]}>
       <Text numberOfLines={1} style={styles.controllerRange}>
-        SURAH {startSurah}–{endSurah}{rangeRepeat > 1 ? ` · RANGE ${speech.status === 'idle' ? 1 : speech.rangeIteration}/${rangeRepeat}` : ''}
+        SURAH {startSurah}–{endSurah}
+        {rangeRepeat > 1 ? ` · RANGE ${speech.status === 'idle' ? 1 : speech.rangeIteration}/${rangeRepeat}` : ''}
       </Text>
       <Text numberOfLines={1} style={styles.controllerAyah}>
-        {speech.status !== 'idle' && speech.currentVerseKey
-          ? `Ayah ${speech.currentVerseKey}`
-          : selectedVerseKey ? `Start ${selectedVerseKey}` : 'From the beginning'}
+        {speech.status !== 'idle' && speech.currentVerseKey ? `Ayah ${speech.currentVerseKey}` : selectedVerseKey ? `Start ${selectedVerseKey}` : 'From the beginning'}
       </Text>
     </View>
   );
@@ -286,45 +300,42 @@ export default function RecitationScreen() {
 
   return (
     <>
-      <FolioScreen
-        contentStyle={styles.screen}
-        scroll={false}
-      >
+      <FolioScreen contentStyle={styles.screen} scroll={false}>
         <View style={styles.verseListShell}>
           <FlatList
             contentContainerStyle={styles.verseList}
             data={playbackRows}
             keyExtractor={(item) => item.key}
-            ListHeaderComponent={(
+            ListHeaderComponent={
               <>
-                <FolioHeader
-                  eyebrow="Listen and repeat"
-                  subtitle="Play recitation, translation, or both across a chosen Surah range."
-                  title="Recitation"
-                />
+                <FolioHeader eyebrow="Listen and repeat" subtitle="Play recitation, translation, or both across a chosen Surah range." title="Recitation" />
                 <View style={styles.playerCard}>
-          <View style={styles.playerTopline}>
-            <View style={styles.playerCopy}>
-              <Text style={styles.sourceLabel}>{sourceLabel}</Text>
-              <Text style={styles.rangeLabel}>Surah {startSurah}–{endSurah} · {rangeRepeat}× range · {ayahRepeat}× each Ayah</Text>
-            </View>
-            <Ionicons color={hasSource ? colors.gold : colors.inkMuted} name="headset" size={30} />
-          </View>
+                  <View style={styles.playerTopline}>
+                    <View style={styles.playerCopy}>
+                      <Text style={styles.sourceLabel}>{sourceLabel}</Text>
+                      <Text style={styles.rangeLabel}>
+                        Surah {startSurah}–{endSurah} · {rangeRepeat}× range · {ayahRepeat}× each Ayah
+                      </Text>
+                    </View>
+                    <Ionicons color={hasSource ? colors.gold : colors.inkMuted} name="headset" size={30} />
+                  </View>
 
-          {!hasSource ? (
-            <Pressable onPress={openSettings} style={styles.emptyPrompt}>
-              <Ionicons color={colors.gold} name="information-circle-outline" size={20} />
-              <Text style={styles.emptyText}>Open settings and choose at least one audio source.</Text>
-            </Pressable>
-          ) : null}
-
+                  {!hasSource ? (
+                    <Pressable onPress={openSettings} style={styles.emptyPrompt}>
+                      <Ionicons color={colors.gold} name="information-circle-outline" size={20} />
+                      <Text style={styles.emptyText}>Open settings and choose at least one audio source.</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
                 <View style={styles.verseHeading}>
-                  <View style={styles.verseHeadingCopy}><Text style={styles.verseEyebrow}>PLAYLIST</Text><Text style={styles.verseTitle}>Tap an Ayah to move the playhead</Text></View>
+                  <View style={styles.verseHeadingCopy}>
+                    <Text style={styles.verseEyebrow}>PLAYLIST</Text>
+                    <Text style={styles.verseTitle}>Tap an Ayah to move the playhead</Text>
+                  </View>
                   <Text style={styles.verseCount}>{playbackRows.length} AYAHS</Text>
                 </View>
               </>
-            )}
+            }
             ListEmptyComponent={versesLoading ? <ActivityIndicator color={colors.gold} size="large" style={styles.listLoader} /> : null}
             onScrollBeginDrag={() => setFollowingPlayback(false)}
             onScrollToIndexFailed={({ index }) => setTimeout(() => verseListRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.42 }), 250)}
@@ -336,7 +347,11 @@ export default function RecitationScreen() {
               const showSurah = index === 0 || playbackRows[index - 1]?.surahNumber !== item.surahNumber;
               return (
                 <>
-                  {showSurah ? <Text style={styles.surahDivider}>SURAH {item.surahNumber} · {surahs.data?.[item.surahNumber - 1]?.nameTransliterated}</Text> : null}
+                  {showSurah ? (
+                    <Text style={styles.surahDivider}>
+                      SURAH {item.surahNumber} · {surahs.data?.[item.surahNumber - 1]?.nameTransliterated}
+                    </Text>
+                  ) : null}
                   <Pressable
                     accessibilityLabel={`Set playhead to Ayah ${item.key}`}
                     accessibilityRole="button"
@@ -349,11 +364,21 @@ export default function RecitationScreen() {
                         <Ionicons color={playing ? colors.paperLight : colors.gold} name={playing ? 'volume-high' : selected ? 'play' : 'ellipse-outline'} size={14} />
                       </View>
                       <Text style={styles.verseKey}>AYAH {item.key}</Text>
-                      {playing ? <Text style={styles.playingLabel}>{speech.phase === 'translation' ? 'TRANSLATION' : 'RECITING'}</Text> : selected ? <Text style={styles.selectedLabel}>START HERE</Text> : null}
+                      {playing ? (
+                        <Text style={styles.playingLabel}>{speech.phase === 'translation' ? 'TRANSLATION' : 'RECITING'}</Text>
+                      ) : selected ? (
+                        <Text style={styles.selectedLabel}>START HERE</Text>
+                      ) : null}
                     </View>
-                    <Text selectable style={[styles.verseArabic, { fontSize: 28 * readingFontSize.scale, lineHeight: 48 * readingFontSize.scale }]}>{item.arabic} <Text style={[styles.verseNumber, { fontSize: 20 * readingFontSize.scale }]}>﴿{item.ayahNumber}﴾</Text></Text>
+                    <Text selectable style={[styles.verseArabic, { fontSize: 28 * readingFontSize.scale, lineHeight: 48 * readingFontSize.scale }]}>
+                      {item.arabic} <Text style={[styles.verseNumber, { fontSize: 20 * readingFontSize.scale }]}>﴿{item.ayahNumber}﴾</Text>
+                    </Text>
                     {item.translation ? <View style={styles.verseRule} /> : null}
-                    {item.translation ? <Text selectable style={[styles.verseTranslation, { fontSize: 18 * readingFontSize.scale, lineHeight: 25 * readingFontSize.scale }]}>{item.translation}</Text> : null}
+                    {item.translation ? (
+                      <Text selectable style={[styles.verseTranslation, { fontSize: 18 * readingFontSize.scale, lineHeight: 25 * readingFontSize.scale }]}>
+                        {item.translation}
+                      </Text>
+                    ) : null}
                   </Pressable>
                 </>
               );
@@ -363,9 +388,23 @@ export default function RecitationScreen() {
           />
           <View style={styles.stickyControls}>
             {Platform.OS === 'web' ? (
-              <>{stopControl}{playControl}{statusControl}{volumeControl}{settingsControl}</>
+              <>
+                {stopControl}
+                {playControl}
+                {statusControl}
+                {volumeControl}
+                {settingsControl}
+              </>
             ) : (
-              <>{statusControl}<View style={styles.mobileControlRow}>{stopControl}{playControl}{volumeControl}{settingsControl}</View></>
+              <>
+                {statusControl}
+                <View style={styles.mobileControlRow}>
+                  {stopControl}
+                  {playControl}
+                  {volumeControl}
+                  {settingsControl}
+                </View>
+              </>
             )}
           </View>
           {showFollowPrompt ? (
@@ -409,7 +448,8 @@ export default function RecitationScreen() {
                       accessibilityRole="radio"
                       accessibilityState={{ checked: selected }}
                       onPress={() => {
-                        if (rangePicker === 'start') changeStart(item.number); else changeEnd(item.number);
+                        if (rangePicker === 'start') changeStart(item.number);
+                        else changeEnd(item.number);
                         setRangePicker(null);
                       }}
                       style={[styles.surahOption, selected ? styles.choiceSelected : null]}
@@ -422,32 +462,60 @@ export default function RecitationScreen() {
                   );
                 }}
               />
-            ) : <ScrollView contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
-              <SettingSection title="Reciter">
-                <Choice label="None" onPress={() => selectReciter(null)} selected={!reciterId} />
-                {RECITERS.map((reciter) => <Choice key={reciter.id} label={reciter.name} meta={reciter.style} onPress={() => selectReciter(reciter.id)} selected={reciterId === reciter.id} />)}
-              </SettingSection>
+            ) : (
+              <ScrollView contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
+                <SettingSection title="Reciter">
+                  <Choice label="None" onPress={() => selectReciter(null)} selected={!reciterId} />
+                  {RECITERS.map((reciter) => (
+                    <Choice key={reciter.id} label={reciter.name} meta={reciter.style} onPress={() => selectReciter(reciter.id)} selected={reciterId === reciter.id} />
+                  ))}
+                </SettingSection>
 
-              <SettingSection title="Translation">
-                <Choice label="None" onPress={() => selectTranslation(null)} selected={!translation} />
-                {translations.data?.map((item) => <Choice key={item.id} label={item.title} meta={`${item.language} · ${item.translator}`} onPress={() => selectTranslation(item.id)} selected={translation?.id === item.id} />)}
-                {!translations.isLoading && !translations.data?.length ? <Text style={styles.help}>Import a translation from the Library to make it available here.</Text> : null}
-              </SettingSection>
+                <SettingSection title="Translation">
+                  <Choice label="None" onPress={() => selectTranslation(null)} selected={!translation} />
+                  {translations.data?.map((item) => (
+                    <Choice key={item.id} label={item.title} meta={`${item.language} · ${item.translator}`} onPress={() => selectTranslation(item.id)} selected={translation?.id === item.id} />
+                  ))}
+                  {!translations.isLoading && !translations.data?.length ? <Text style={styles.help}>Import a translation from the Library to make it available here.</Text> : null}
+                </SettingSection>
 
-              <SettingSection title="Volume">
-                <Stepper label="Playback volume" max={100} min={0} onChange={(next) => changeVolume(next / 100)} suffix="%" step={10} value={Math.round(volume * 100)} />
-              </SettingSection>
+                <SettingSection title="Volume">
+                  <Stepper label="Playback volume" max={100} min={0} onChange={(next) => changeVolume(next / 100)} suffix="%" step={10} value={Math.round(volume * 100)} />
+                </SettingSection>
 
-              <SettingSection title="Surah range">
-                <RangeChoice label="From" name={startName} number={startSurah} onPress={() => setRangePicker('start')} />
-                <RangeChoice label="To" name={endName} number={endSurah} onPress={() => setRangePicker('end')} />
-              </SettingSection>
+                <SettingSection title="Surah range">
+                  <RangeChoice label="From" name={startName} number={startSurah} onPress={() => setRangePicker('start')} />
+                  <RangeChoice label="To" name={endName} number={endSurah} onPress={() => setRangePicker('end')} />
+                </SettingSection>
 
-              <SettingSection title="Repeat">
-                <Stepper label="Range repeat" max={20} min={1} onChange={(next) => { stopForChange(); setRangeRepeatOverride(next); persistNumber(keys.rangeRepeat, next); }} suffix="×" value={rangeRepeat} />
-                <Stepper label="Individual Ayah repeat" max={20} min={1} onChange={(next) => { stopForChange(); setAyahRepeatOverride(next); persistNumber(keys.ayahRepeat, next); }} suffix="×" value={ayahRepeat} />
-              </SettingSection>
-            </ScrollView>}
+                <SettingSection title="Repeat">
+                  <Stepper
+                    label="Range repeat"
+                    max={20}
+                    min={1}
+                    onChange={(next) => {
+                      stopForChange();
+                      setRangeRepeatOverride(next);
+                      persistNumber(keys.rangeRepeat, next);
+                    }}
+                    suffix="×"
+                    value={rangeRepeat}
+                  />
+                  <Stepper
+                    label="Individual Ayah repeat"
+                    max={20}
+                    min={1}
+                    onChange={(next) => {
+                      stopForChange();
+                      setAyahRepeatOverride(next);
+                      persistNumber(keys.ayahRepeat, next);
+                    }}
+                    suffix="×"
+                    value={ayahRepeat}
+                  />
+                </SettingSection>
+              </ScrollView>
+            )}
           </AnimatedSafeAreaView>
         </View>
       </Modal>
@@ -456,13 +524,21 @@ export default function RecitationScreen() {
 }
 
 function SettingSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return <View style={styles.section}><Text style={styles.sectionTitle}>{title}</Text>{children}</View>;
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {children}
+    </View>
+  );
 }
 
 function Choice({ label, meta, selected, onPress }: { label: string; meta?: string; selected: boolean; onPress: () => void }) {
   return (
     <Pressable accessibilityRole="radio" accessibilityState={{ checked: selected }} onPress={onPress} style={[styles.choice, selected ? styles.choiceSelected : null]}>
-      <View style={styles.choiceCopy}><Text style={styles.choiceLabel}>{label}</Text>{meta ? <Text style={styles.choiceMeta}>{meta}</Text> : null}</View>
+      <View style={styles.choiceCopy}>
+        <Text style={styles.choiceLabel}>{label}</Text>
+        {meta ? <Text style={styles.choiceMeta}>{meta}</Text> : null}
+      </View>
       <Ionicons color={selected ? colors.emerald : colors.border} name={selected ? 'radio-button-on' : 'radio-button-off'} size={21} />
     </Pressable>
   );
@@ -471,20 +547,61 @@ function Choice({ label, meta, selected, onPress }: { label: string; meta?: stri
 function RangeChoice({ label, name, number, onPress }: { label: string; name: string; number: number; onPress: () => void }) {
   return (
     <Pressable accessibilityLabel={`${label} Surah, currently ${number} ${name}`} onPress={onPress} style={styles.rangeChoice}>
-      <View style={styles.rangeNumber}><Text style={styles.rangeNumberText}>{number}</Text></View>
-      <View style={styles.choiceCopy}><Text style={styles.choiceMeta}>{label.toUpperCase()}</Text><Text style={styles.choiceLabel}>{name}</Text></View>
+      <View style={styles.rangeNumber}>
+        <Text style={styles.rangeNumberText}>{number}</Text>
+      </View>
+      <View style={styles.choiceCopy}>
+        <Text style={styles.choiceMeta}>{label.toUpperCase()}</Text>
+        <Text style={styles.choiceLabel}>{name}</Text>
+      </View>
       <Ionicons color={colors.gold} name="chevron-down" size={19} />
     </Pressable>
   );
 }
 
-function Stepper({ label, value, min, max, step = 1, suffix = '', onChange }: { label: string; value: number; min: number; max: number; step?: number; suffix?: string; onChange: (value: number) => void }) {
+function Stepper({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  suffix = '',
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  suffix?: string;
+  onChange: (value: number) => void;
+}) {
   return (
     <View style={styles.stepper}>
-      <View style={styles.stepperCopy}><Text style={styles.stepperLabel}>{label}</Text><Text style={styles.stepperValue}>{value}{suffix}</Text></View>
+      <View style={styles.stepperCopy}>
+        <Text style={styles.stepperLabel}>{label}</Text>
+        <Text style={styles.stepperValue}>
+          {value}
+          {suffix}
+        </Text>
+      </View>
       <View style={styles.stepperButtons}>
-        <Pressable accessibilityLabel={`Decrease ${label}`} disabled={value <= min} onPress={() => onChange(Math.max(min, value - step))} style={[styles.stepButton, value <= min ? styles.disabled : null]}><Ionicons color={colors.emerald} name="remove" size={20} /></Pressable>
-        <Pressable accessibilityLabel={`Increase ${label}`} disabled={value >= max} onPress={() => onChange(Math.min(max, value + step))} style={[styles.stepButton, value >= max ? styles.disabled : null]}><Ionicons color={colors.emerald} name="add" size={20} /></Pressable>
+        <Pressable
+          accessibilityLabel={`Decrease ${label}`}
+          disabled={value <= min}
+          onPress={() => onChange(Math.max(min, value - step))}
+          style={[styles.stepButton, value <= min ? styles.disabled : null]}
+        >
+          <Ionicons color={colors.emerald} name="remove" size={20} />
+        </Pressable>
+        <Pressable
+          accessibilityLabel={`Increase ${label}`}
+          disabled={value >= max}
+          onPress={() => onChange(Math.min(max, value + step))}
+          style={[styles.stepButton, value >= max ? styles.disabled : null]}
+        >
+          <Ionicons color={colors.emerald} name="add" size={20} />
+        </Pressable>
       </View>
     </View>
   );
@@ -530,7 +647,29 @@ const styles = StyleSheet.create({
   verseNumber: { color: colors.gold, fontFamily: fontFamilies.arabic, fontSize: 20 },
   verseRule: { backgroundColor: colors.gold, height: 1, marginVertical: 12, opacity: 0.45, width: 30 },
   verseTranslation: { color: colors.ink, fontFamily: fontFamilies.body, fontSize: 18, lineHeight: 25 },
-  stickyControls: { alignItems: 'center', alignSelf: 'center', backgroundColor: colors.paperLight, borderColor: colors.border, borderRadius: 28, borderWidth: 1, bottom: 10, elevation: 6, flexDirection: Platform.OS === 'web' ? 'row' : 'column', gap: Platform.OS === 'web' ? 4 : 2, justifyContent: 'center', maxWidth: Platform.OS === 'web' ? '96%' : 380, minWidth: Platform.OS === 'web' ? 320 : 280, paddingHorizontal: Platform.OS === 'web' ? 6 : 12, paddingVertical: Platform.OS === 'web' ? 6 : 8, position: 'absolute', shadowColor: '#000', shadowOffset: { height: 2, width: 0 }, shadowOpacity: 0.2, shadowRadius: 5, width: Platform.OS === 'web' ? 'auto' : '94%' },
+  stickyControls: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: colors.paperLight,
+    borderColor: colors.border,
+    borderRadius: 28,
+    borderWidth: 1,
+    bottom: 10,
+    elevation: 6,
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: Platform.OS === 'web' ? 4 : 2,
+    justifyContent: 'center',
+    maxWidth: Platform.OS === 'web' ? '96%' : 380,
+    minWidth: Platform.OS === 'web' ? 320 : 280,
+    paddingHorizontal: Platform.OS === 'web' ? 6 : 12,
+    paddingVertical: Platform.OS === 'web' ? 6 : 8,
+    position: 'absolute',
+    shadowColor: '#000',
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    width: Platform.OS === 'web' ? 'auto' : '94%',
+  },
   compactControl: { alignItems: 'center', borderRadius: 18, height: 38, justifyContent: 'center', width: 34 },
   compactPlayControl: { alignItems: 'center', backgroundColor: colors.emerald, borderRadius: 22, height: 44, justifyContent: 'center', width: 44 },
   controllerStatus: { flexShrink: 1, minWidth: 110, paddingHorizontal: 4 },
@@ -538,7 +677,23 @@ const styles = StyleSheet.create({
   mobileControlRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-around', width: '100%' },
   controllerRange: { color: colors.gold, fontFamily: fontFamilies.bodyBold, fontSize: 9, letterSpacing: 0.9 },
   controllerAyah: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 13, marginTop: 1 },
-  followButton: { alignItems: 'center', alignSelf: 'center', backgroundColor: colors.emerald, borderRadius: 22, bottom: Platform.OS === 'web' ? 70 : 112, elevation: 4, flexDirection: 'row', gap: 7, paddingHorizontal: 16, paddingVertical: 10, position: 'absolute', shadowColor: '#000', shadowOffset: { height: 2, width: 0 }, shadowOpacity: 0.22, shadowRadius: 4 },
+  followButton: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: colors.emerald,
+    borderRadius: 22,
+    bottom: Platform.OS === 'web' ? 70 : 112,
+    elevation: 4,
+    flexDirection: 'row',
+    gap: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    position: 'absolute',
+    shadowColor: '#000',
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 0.22,
+    shadowRadius: 4,
+  },
   followText: { color: colors.paperLight, fontFamily: fontFamilies.bodyBold, fontSize: 14 },
   modalRoot: { backgroundColor: 'transparent', flex: 1, justifyContent: 'flex-end' },
   modalBackdrop: { backgroundColor: 'rgba(12,24,20,0.5)' },
@@ -556,7 +711,16 @@ const styles = StyleSheet.create({
   choiceCopy: { flex: 1 },
   choiceLabel: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 16 },
   choiceMeta: { color: colors.inkMuted, fontFamily: fontFamilies.body, fontSize: 13 },
-  rangeChoice: { alignItems: 'center', borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 12, minHeight: 62, paddingHorizontal: 8, paddingVertical: 8 },
+  rangeChoice: {
+    alignItems: 'center',
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 62,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
   rangeNumber: { alignItems: 'center', borderColor: colors.gold, borderRadius: 19, borderWidth: 1, height: 38, justifyContent: 'center', width: 38 },
   rangeNumberText: { color: colors.emerald, fontFamily: fontFamilies.bodyBold, fontSize: 14 },
   surahOption: { alignItems: 'center', borderBottomColor: colors.border, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 12, minHeight: 58, paddingHorizontal: 10 },

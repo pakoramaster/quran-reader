@@ -110,7 +110,10 @@ function createRequestHandler(webRoot, ttsService = null) {
         return;
       }
       try {
-        if (requestUrl.searchParams.get('ensure') === '1') await ttsService.ensureModel();
+        if (requestUrl.searchParams.get('ensure') === '1') {
+          if (ttsService.warm) await ttsService.warm();
+          else await ttsService.ensureModel();
+        }
         sendJson(response, method, 200, { ready: ttsService.ready() });
       } catch (error) {
         sendJson(response, method, 500, { ready: false, error: error instanceof Error ? error.message : String(error) });
@@ -172,8 +175,8 @@ function createRequestHandler(webRoot, ttsService = null) {
   };
 }
 
-function startStaticServer({ port, webRoot, dataRoot, ttsService }) {
-  const service = ttsService ?? (dataRoot ? require('./ttsServer.cjs').createTtsService(path.resolve(dataRoot)) : null);
+function startStaticServer({ port, webRoot, dataRoot, bundledModelsRoot, ttsService }) {
+  const service = ttsService ?? (dataRoot ? require('./ttsServer.cjs').createTtsService(path.resolve(dataRoot), bundledModelsRoot) : null);
   const server = http.createServer(createRequestHandler(path.resolve(webRoot), service));
   return new Promise((resolve, reject) => {
     const handleError = (error) => {

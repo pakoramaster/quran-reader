@@ -16,13 +16,10 @@ import { DEFAULT_RECITER_ID, getReciter, isReciterId, RECITERS, type PlaybackMod
 import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
 import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
+import { primeUniformSpeech } from '@/features/speech/data/uniformTtsEngine';
 import { DEFAULT_VOICE_PROFILE_ID, isVoiceProfileId } from '@/features/speech/domain/voiceProfiles';
 import { getTtsSpeed, isTtsSpeedId } from '@/features/speech/domain/ttsSpeeds';
-import {
-  getActiveTranslationId,
-  getTranslation,
-  listTranslationVerses,
-} from '@/features/translations/data/translationRepository';
+import { getActiveTranslationId, getTranslation, listTranslationVerses } from '@/features/translations/data/translationRepository';
 import { colors, fontFamilies } from '@/theme/tokens';
 import type { HighlightColor, ReaderAyah } from '@/types/domain';
 
@@ -78,8 +75,8 @@ export default function SurahReaderScreen() {
     queryFn: async () => ({ mode: await getSetting(userDb, 'playback_mode'), reciter: await getSetting(userDb, 'reciter_id') }),
   });
   const storedMode = playbackSettings.data?.mode;
-  const playbackMode: PlaybackMode = playbackModeOverride
-    ?? (storedMode === 'recitation' || ((storedMode === 'translation' || storedMode === 'both') && activeTranslation.data) ? storedMode : 'recitation');
+  const playbackMode: PlaybackMode =
+    playbackModeOverride ?? (storedMode === 'recitation' || ((storedMode === 'translation' || storedMode === 'both') && activeTranslation.data) ? storedMode : 'recitation');
   const storedReciter = playbackSettings.data?.reciter ?? null;
   const reciterId = reciterIdOverride ?? (isReciterId(storedReciter) ? storedReciter : DEFAULT_RECITER_ID);
   const voiceProfileId = isVoiceProfileId(speechSettings.data?.profile) ? speechSettings.data.profile : DEFAULT_VOICE_PROFILE_ID;
@@ -101,6 +98,18 @@ export default function SurahReaderScreen() {
   }, [annotations.data, arabicAyahs.data, translatedAyahs.data]);
 
   useEffect(() => {
+    if (playbackMode === 'recitation' || !activeTranslation.data) return undefined;
+    const controller = new AbortController();
+    const firstAyah = selectedAyahNumber ?? spokenAyahNumber ?? (targetAyah > 0 ? targetAyah : 1);
+    const texts = readerAyahs
+      .filter((verse) => verse.ayahNumber >= firstAyah && verse.translationText)
+      .slice(0, 3)
+      .map((verse) => verse.translationText!);
+    void primeUniformSpeech(texts, voiceProfileId, voiceSpeed.value, controller.signal).catch(() => undefined);
+    return () => controller.abort();
+  }, [activeTranslation.data, playbackMode, readerAyahs, selectedAyahNumber, spokenAyahNumber, targetAyah, voiceProfileId, voiceSpeed.value]);
+
+  useEffect(() => {
     if (targetAyah > 0 && readerAyahs.length >= targetAyah) {
       const timeout = setTimeout(() => listRef.current?.scrollToIndex({ index: targetAyah - 1, animated: true }), 250);
       return () => clearTimeout(timeout);
@@ -109,9 +118,12 @@ export default function SurahReaderScreen() {
   }, [readerAyahs.length, targetAyah]);
 
   const resetSpeech = speech.reset;
-  useEffect(() => () => {
-    void resetSpeech();
-  }, [resetSpeech]);
+  useEffect(
+    () => () => {
+      void resetSpeech();
+    },
+    [resetSpeech],
+  );
 
   const saveMutation = useMutation({
     mutationFn: ({ note, highlight }: { note: string | null; highlight: HighlightColor | null }) =>
@@ -124,10 +136,7 @@ export default function SurahReaderScreen() {
       }),
     onSuccess: async () => {
       setEditorAyah(null);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['annotations', surahNumber] }),
-        queryClient.invalidateQueries({ queryKey: ['annotated-ayahs'] }),
-      ]);
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['annotations', surahNumber] }), queryClient.invalidateQueries({ queryKey: ['annotated-ayahs'] })]);
     },
   });
 
@@ -140,16 +149,9 @@ export default function SurahReaderScreen() {
   const isReading = speech.status === 'speaking';
   const [speechSurahPart, speechAyahPart] = speech.currentVerseKey?.split(':') ?? [];
   const speechAyahNumber = Number(speechAyahPart);
-  const speechCursor = Number(speechSurahPart) === surahNumber && Number.isInteger(speechAyahNumber)
-    ? speechAyahNumber
-    : null;
+  const speechCursor = Number(speechSurahPart) === surahNumber && Number.isInteger(speechAyahNumber) ? speechAyahNumber : null;
   const activeSpeechCursor = speech.status === 'speaking' || speech.status === 'paused' ? speechCursor : null;
-  const playbackStartAyah = activeSpeechCursor
-    ?? spokenAyahNumber
-    ?? selectedAyahNumber
-    ?? speechCursor
-    ?? (targetAyah > 0 ? targetAyah : null)
-    ?? 1;
+  const playbackStartAyah = activeSpeechCursor ?? spokenAyahNumber ?? selectedAyahNumber ?? speechCursor ?? (targetAyah > 0 ? targetAyah : null) ?? 1;
   const selectAyah = (ayahNumber: number) => {
     if (speech.status === 'speaking' || speech.status === 'paused') void speech.stop();
     setSelectedAyahNumber(ayahNumber);
@@ -190,7 +192,9 @@ export default function SurahReaderScreen() {
           <Ionicons color={colors.paperLight} name="arrow-back" size={22} />
         </Pressable>
         <View style={styles.headerCopy}>
-          <Text style={styles.headerEyebrow}>SURAH {surahNumber} · {surah.data.ayahCount} AYAHS</Text>
+          <Text style={styles.headerEyebrow}>
+            SURAH {surahNumber} · {surah.data.ayahCount} AYAHS
+          </Text>
           <Text style={styles.headerTitle}>{surah.data.nameTransliterated}</Text>
         </View>
         <Text style={styles.headerArabic}>{surah.data.nameArabic}</Text>
@@ -201,8 +205,16 @@ export default function SurahReaderScreen() {
           {(['recitation', 'translation', 'both'] as const).map((mode) => {
             const disabled = mode !== 'recitation' && !activeTranslation.data;
             return (
-              <Pressable accessibilityRole="button" disabled={disabled} key={mode} onPress={() => chooseMode(mode)} style={[styles.modeChip, playbackMode === mode ? styles.modeChipActive : null, disabled ? styles.modeChipDisabled : null]}>
-                <Text style={[styles.modeChipText, playbackMode === mode ? styles.modeChipTextActive : null]}>{mode === 'recitation' ? 'Qur’an' : mode === 'translation' ? 'Translation' : 'Both'}</Text>
+              <Pressable
+                accessibilityRole="button"
+                disabled={disabled}
+                key={mode}
+                onPress={() => chooseMode(mode)}
+                style={[styles.modeChip, playbackMode === mode ? styles.modeChipActive : null, disabled ? styles.modeChipDisabled : null]}
+              >
+                <Text style={[styles.modeChipText, playbackMode === mode ? styles.modeChipTextActive : null]}>
+                  {mode === 'recitation' ? 'Qur’an' : mode === 'translation' ? 'Translation' : 'Both'}
+                </Text>
               </Pressable>
             );
           })}
@@ -225,9 +237,11 @@ export default function SurahReaderScreen() {
             <Text style={styles.playbackState}>
               {speech.status === 'speaking' || speech.status === 'paused'
                 ? `${speech.phase === 'recitation' ? 'Reciting' : 'Reading'} ${speech.currentVerseKey}`
-                : speech.status === 'loading' ? `Loading ${speech.currentVerseKey}`
-                : speech.status === 'error' ? speech.error
-                : `Start at ${surahNumber}:${playbackStartAyah}`}
+                : speech.status === 'loading'
+                  ? `Loading ${speech.currentVerseKey}`
+                  : speech.status === 'error'
+                    ? speech.error
+                    : `Start at ${surahNumber}:${playbackStartAyah}`}
             </Text>
           </View>
           {speech.status === 'paused' ? (
@@ -239,11 +253,7 @@ export default function SurahReaderScreen() {
               <Ionicons color={colors.emerald} name="pause" size={21} />
             </Pressable>
           ) : (
-            <Pressable
-              accessibilityLabel="Read this Surah aloud"
-              onPress={startSurahPlayback}
-              style={styles.playButton}
-            >
+            <Pressable accessibilityLabel="Read this Surah aloud" onPress={startSurahPlayback} style={styles.playButton}>
               <Ionicons color={colors.emerald} name="play" size={21} />
             </Pressable>
           )}
@@ -268,8 +278,7 @@ export default function SurahReaderScreen() {
         ref={listRef}
         renderItem={({ item }) => {
           const highlighted = item.annotation?.highlightColor;
-          const speaking = (speech.status === 'speaking' || speech.status === 'paused')
-            && speech.currentVerseKey === item.verseKey;
+          const speaking = (speech.status === 'speaking' || speech.status === 'paused') && speech.currentVerseKey === item.verseKey;
           const selected = item.ayahNumber === playbackStartAyah;
           return (
             <Pressable
@@ -293,15 +302,7 @@ export default function SurahReaderScreen() {
                     onPress={(event) => {
                       event.stopPropagation();
                       setSpokenAyahNumber(item.ayahNumber);
-                      speech.play(
-                        [{ key: item.verseKey, text: item.translationText ?? '' }],
-                        playbackMode,
-                        reciterId,
-                        activeTranslation.data?.language,
-                        voiceProfileId,
-                        voiceSpeed.value,
-                        1,
-                      );
+                      speech.play([{ key: item.verseKey, text: item.translationText ?? '' }], playbackMode, reciterId, activeTranslation.data?.language, voiceProfileId, voiceSpeed.value, 1);
                     }}
                     style={styles.iconButton}
                   >
@@ -316,22 +317,26 @@ export default function SurahReaderScreen() {
                       }}
                       style={styles.iconButton}
                     >
-                      <Ionicons
-                        color={item.annotation ? colors.gold : colors.inkMuted}
-                        name={item.annotation ? 'bookmark' : 'bookmark-outline'}
-                        size={19}
-                      />
+                      <Ionicons color={item.annotation ? colors.gold : colors.inkMuted} name={item.annotation ? 'bookmark' : 'bookmark-outline'} size={19} />
                     </Pressable>
                   ) : null}
                 </View>
               </View>
-              <Text selectable style={[styles.ayahArabic, { fontSize: 29 * readingFontSize.scale, lineHeight: 52 * readingFontSize.scale }]}>{item.textUthmani} <Text style={[styles.ayahNumber, { fontSize: 21 * readingFontSize.scale }]}>﴿{item.ayahNumber}﴾</Text></Text>
+              <Text selectable style={[styles.ayahArabic, { fontSize: 29 * readingFontSize.scale, lineHeight: 52 * readingFontSize.scale }]}>
+                {item.textUthmani} <Text style={[styles.ayahNumber, { fontSize: 21 * readingFontSize.scale }]}>﴿{item.ayahNumber}﴾</Text>
+              </Text>
               {item.translationText ? <View style={styles.divider} /> : null}
-              {item.translationText ? <Text selectable style={[styles.translation, { fontSize: 19 * readingFontSize.scale, lineHeight: 27 * readingFontSize.scale }]}>{item.translationText}</Text> : null}
+              {item.translationText ? (
+                <Text selectable style={[styles.translation, { fontSize: 19 * readingFontSize.scale, lineHeight: 27 * readingFontSize.scale }]}>
+                  {item.translationText}
+                </Text>
+              ) : null}
               {item.annotation?.noteText ? (
                 <View style={styles.notePreview}>
                   <Text style={styles.noteLabel}>REFLECTION</Text>
-                  <Text numberOfLines={3} style={[styles.noteText, { fontSize: 17 * readingFontSize.scale, lineHeight: 22 * readingFontSize.scale }]}>{item.annotation.noteText}</Text>
+                  <Text numberOfLines={3} style={[styles.noteText, { fontSize: 17 * readingFontSize.scale, lineHeight: 22 * readingFontSize.scale }]}>
+                    {item.annotation.noteText}
+                  </Text>
                 </View>
               ) : null}
             </Pressable>
@@ -359,7 +364,16 @@ const styles = StyleSheet.create({
   headerEyebrow: { color: colors.goldLight, fontFamily: fontFamilies.bodyBold, fontSize: 10, letterSpacing: 1.3 },
   headerTitle: { color: colors.paperLight, fontFamily: fontFamilies.display, fontSize: 25 },
   headerArabic: { color: colors.paperLight, fontFamily: fontFamilies.arabicBold, fontSize: 23 },
-  playbackBar: { alignItems: 'center', backgroundColor: colors.paperLight, borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: 'row', gap: 8, paddingHorizontal: 18, paddingVertical: 10 },
+  playbackBar: {
+    alignItems: 'center',
+    backgroundColor: colors.paperLight,
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
   playbackOptions: { backgroundColor: colors.paperLight, borderBottomColor: colors.border, borderBottomWidth: 1, gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
   chipRow: { flexDirection: 'row', gap: 8 },
   modeChip: { borderColor: colors.border, borderRadius: 18, borderWidth: 1, paddingHorizontal: 13, paddingVertical: 7 },
