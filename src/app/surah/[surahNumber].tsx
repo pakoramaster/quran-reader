@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import * as Speech from 'expo-speech';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,8 +14,9 @@ import { AnnotationEditor } from '@/features/annotations/ui/AnnotationEditor';
 import { getSurah, listAyahs } from '@/features/quran-reader/data/quranRepository';
 import { DEFAULT_RECITER_ID, getReciter, isReciterId, RECITERS, type PlaybackMode, type ReciterId } from '@/features/recitation/domain/reciters';
 import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
+import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
-import { DEFAULT_VOICE_PROFILE_ID, getVoiceProfile, isVoiceProfileId, resolveVoiceForProfile } from '@/features/speech/domain/voiceProfiles';
+import { DEFAULT_VOICE_PROFILE_ID, getVoiceProfile, isVoiceProfileId } from '@/features/speech/domain/voiceProfiles';
 import {
   getActiveTranslationId,
   getTranslation,
@@ -33,18 +33,13 @@ export default function SurahReaderScreen() {
   const userDb = useUserDatabase();
   const queryClient = useQueryClient();
   const speech = useSpeech();
+  const readingFontSize = useReadingFontSize();
   const listRef = useRef<FlatList<ReaderAyah>>(null);
   const [editorAyah, setEditorAyah] = useState<ReaderAyah | null>(null);
   const [selectedAyahNumber, setSelectedAyahNumber] = useState<number | null>(null);
   const [spokenAyahNumber, setSpokenAyahNumber] = useState<number | null>(null);
   const [playbackModeOverride, setPlaybackModeOverride] = useState<PlaybackMode | null>(null);
   const [reciterIdOverride, setReciterIdOverride] = useState<ReciterId | null>(null);
-  const [voices, setVoices] = useState<Speech.Voice[]>([]);
-
-  useEffect(() => {
-    void Speech.getAvailableVoicesAsync().then(setVoices).catch(() => setVoices([]));
-  }, []);
-
   const surah = useQuery({
     queryKey: ['surah', surahNumber],
     queryFn: () => getSurah(quranDb, surahNumber),
@@ -87,9 +82,6 @@ export default function SurahReaderScreen() {
   const reciterId = reciterIdOverride ?? (isReciterId(storedReciter) ? storedReciter : DEFAULT_RECITER_ID);
   const voiceProfileId = isVoiceProfileId(speechSettings.data?.profile) ? speechSettings.data.profile : DEFAULT_VOICE_PROFILE_ID;
   const voiceProfile = getVoiceProfile(voiceProfileId);
-  const translationVoice = activeTranslation.data
-    ? resolveVoiceForProfile(voices, activeTranslation.data.language, voiceProfileId)
-    : undefined;
   const annotations = useQuery({
     queryKey: ['annotations', surahNumber],
     queryFn: () => listAnnotationsForSurah(userDb, surahNumber),
@@ -170,9 +162,9 @@ export default function SurahReaderScreen() {
       playbackMode,
       reciterId,
       activeTranslation.data?.language,
-      translationVoice?.identifier,
+      voiceProfileId,
       voiceProfile.rate,
-      voiceProfile.pitch,
+      1,
     );
   };
 
@@ -304,9 +296,9 @@ export default function SurahReaderScreen() {
                         playbackMode,
                         reciterId,
                         activeTranslation.data?.language,
-                        translationVoice?.identifier,
+                        voiceProfileId,
                         voiceProfile.rate,
-                        voiceProfile.pitch,
+                        1,
                       );
                     }}
                     style={styles.iconButton}
@@ -331,13 +323,13 @@ export default function SurahReaderScreen() {
                   ) : null}
                 </View>
               </View>
-              <Text selectable style={styles.ayahArabic}>{item.textUthmani} <Text style={styles.ayahNumber}>﴿{item.ayahNumber}﴾</Text></Text>
+              <Text selectable style={[styles.ayahArabic, { fontSize: 29 * readingFontSize.scale, lineHeight: 52 * readingFontSize.scale }]}>{item.textUthmani} <Text style={[styles.ayahNumber, { fontSize: 21 * readingFontSize.scale }]}>﴿{item.ayahNumber}﴾</Text></Text>
               {item.translationText ? <View style={styles.divider} /> : null}
-              {item.translationText ? <Text selectable style={styles.translation}>{item.translationText}</Text> : null}
+              {item.translationText ? <Text selectable style={[styles.translation, { fontSize: 19 * readingFontSize.scale, lineHeight: 27 * readingFontSize.scale }]}>{item.translationText}</Text> : null}
               {item.annotation?.noteText ? (
                 <View style={styles.notePreview}>
                   <Text style={styles.noteLabel}>REFLECTION</Text>
-                  <Text numberOfLines={3} style={styles.noteText}>{item.annotation.noteText}</Text>
+                  <Text numberOfLines={3} style={[styles.noteText, { fontSize: 17 * readingFontSize.scale, lineHeight: 22 * readingFontSize.scale }]}>{item.annotation.noteText}</Text>
                 </View>
               ) : null}
             </Pressable>

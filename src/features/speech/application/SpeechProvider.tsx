@@ -1,6 +1,4 @@
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import * as Speech from 'expo-speech';
-import { Platform } from 'react-native';
 import {
   createContext,
   useCallback,
@@ -12,7 +10,11 @@ import {
   type PropsWithChildren,
 } from 'react';
 
-import { getRecitationUrl, type PlaybackMode, type ReciterId } from '@/features/recitation/domain/reciters';
+import { type PlaybackMode, type ReciterId } from '@/features/recitation/domain/reciters';
+import { releaseDownloadedRecitationUri } from '@/features/recitation/data/recitationFileStore';
+import { resolveRecitationPlaybackSource } from '@/features/recitation/data/recitationPlaybackSource';
+import { releaseUniformSpeechUri, synthesizeUniformSpeech } from '@/features/speech/data/uniformTtsEngine';
+import { DEFAULT_VOICE_PROFILE_ID, type VoiceProfileId } from '@/features/speech/domain/voiceProfiles';
 import type { TranslationVerse, VerseKey } from '@/types/domain';
 
 type SpeechStatus = 'idle' | 'speaking' | 'paused' | 'loading' | 'error';
@@ -32,9 +34,9 @@ interface PlaybackVerse extends TranslationVerse {
 }
 
 interface SpeechContextValue extends SpeechState {
-  speakAyah: (verse: TranslationVerse, language: string, voice?: string, rate?: number, pitch?: number, volume?: number) => void;
-  speakSurah: (verses: TranslationVerse[], language: string, voice?: string, rate?: number, pitch?: number, volume?: number) => void;
-  play: (verses: PlaybackVerse[], mode: PlaybackMode, reciterId: ReciterId, language?: string, voice?: string, rate?: number, pitch?: number, volume?: number, repeats?: PlaybackRepeats) => void;
+  speakAyah: (verse: TranslationVerse, language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => void;
+  speakSurah: (verses: TranslationVerse[], language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => void;
+  play: (verses: PlaybackVerse[], mode: PlaybackMode, reciterId: ReciterId, language?: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number, repeats?: PlaybackRepeats) => void;
   pause: () => Promise<void>;
   resume: () => Promise<void>;
   setVolume: (volume: number) => void;
@@ -53,7 +55,7 @@ interface QueueConfig {
   mode: PlaybackMode;
   reciterId: ReciterId;
   language: string;
-  voice?: string;
+  voice: VoiceProfileId;
   rate: number;
   pitch: number;
   volume: number;
@@ -88,60 +90,56 @@ export function SpeechProvider({ children }: PropsWithChildren) {
   const ayahRunRef = useRef(1);
   const rangeRunRef = useRef(1);
   const sessionRef = useRef(0);
+  const readySessionRef = useRef(0);
+  const pausedRef = useRef(false);
   const advanceRef = useRef<(session: number) => void>(() => undefined);
+  const localAudioUriRef = useRef<string | null>(null);
+  const translationAudioUriRef = useRef<string | null>(null);
 
   const beginTranslation = useCallback((index: number, session: number) => {
     const queue = queueRef.current;
     const verse = queue?.verses[index];
     if (!queue || !verse || session !== sessionRef.current) return;
     phaseRef.current = 'translation';
+    readySessionRef.current = 0;
     setState({
-      status: 'speaking',
+      status: 'loading',
       currentVerseKey: verse.key,
       phase: 'translation',
       error: null,
       rangeIteration: rangeRunRef.current,
       rangeRepeat: queue.repeats.range,
     });
-    const chunks: string[] = [];
-    for (let cursor = 0; cursor < verse.text.length; cursor += Speech.maxSpeechInputLength) {
-      chunks.push(verse.text.slice(cursor, cursor + Speech.maxSpeechInputLength));
-    }
-    let chunkIndex = 0;
-    const speakChunk = () => {
-      if (session !== sessionRef.current) return;
-      const chunk = chunks[chunkIndex];
-      if (!chunk) {
-        advanceRef.current(session);
+    setPlayerVolume(player, queue.volume);
+    void synthesizeUniformSpeech(verse.text, queue.voice).then((uri) => {
+      if (session !== sessionRef.current) {
+        releaseUniformSpeechUri(uri);
         return;
       }
-      Speech.speak(chunk, {
-        language: queue.language,
-        voice: queue.voice,
-        rate: queue.rate,
-        pitch: queue.pitch,
-        volume: queue.volume,
-        onDone: () => { chunkIndex += 1; speakChunk(); },
-        onError: (error) => {
-          if (session === sessionRef.current) setState({
-            status: 'error',
-            currentVerseKey: verse.key,
-            phase: 'translation',
-            error: error.message || 'Translation speech failed.',
-            rangeIteration: rangeRunRef.current,
-            rangeRepeat: queue.repeats.range,
-          });
-        },
+      if (translationAudioUriRef.current) releaseUniformSpeechUri(translationAudioUriRef.current);
+      translationAudioUriRef.current = uri;
+      player.replace({ uri, name: `Translation ${verse.key}` });
+      readySessionRef.current = session;
+      if (pausedRef.current) setState((current) => ({ ...current, status: 'paused' }));
+      else player.play();
+    }).catch((error) => {
+      if (session === sessionRef.current) setState({
+        status: 'error',
+        currentVerseKey: verse.key,
+        phase: 'translation',
+        error: error instanceof Error ? error.message : 'Translation speech failed.',
+        rangeIteration: rangeRunRef.current,
+        rangeRepeat: queue.repeats.range,
       });
-    };
-    speakChunk();
-  }, []);
+    });
+  }, [player]);
 
   const beginRecitation = useCallback((index: number, session: number) => {
     const queue = queueRef.current;
     const verse = queue?.verses[index];
     if (!queue || !verse || session !== sessionRef.current) return;
     phaseRef.current = 'recitation';
+    readySessionRef.current = 0;
     setState({
       status: 'loading',
       currentVerseKey: verse.key,
@@ -151,8 +149,18 @@ export function SpeechProvider({ children }: PropsWithChildren) {
       rangeRepeat: queue.repeats.range,
     });
     setPlayerVolume(player, queue.volume);
-    player.replace({ uri: getRecitationUrl(queue.reciterId, verse.key), name: verse.key });
-    player.play();
+    void resolveRecitationPlaybackSource(queue.reciterId, verse.key).then(({ uri, localUri }) => {
+      if (session !== sessionRef.current) {
+        if (localUri) releaseDownloadedRecitationUri(localUri);
+        return;
+      }
+      if (localAudioUriRef.current) releaseDownloadedRecitationUri(localAudioUriRef.current);
+      localAudioUriRef.current = localUri;
+      player.replace({ uri, name: verse.key });
+      readySessionRef.current = session;
+      if (pausedRef.current) setState((current) => ({ ...current, status: 'paused' }));
+      else player.play();
+    });
   }, [player]);
 
   const beginAt = useCallback((index: number, session: number) => {
@@ -190,11 +198,16 @@ export function SpeechProvider({ children }: PropsWithChildren) {
 
   useEffect(() => { advanceRef.current = advance; }, [advance]);
   useEffect(() => {
-    if (phaseRef.current !== 'recitation') return;
+    if (!phaseRef.current) return;
     if (playerStatus.error) {
       // Audio status is an external native event reflected into React state.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setState((current) => ({ ...current, status: 'error', error: 'Recitation could not be streamed. Check your connection and try again.' }));
+      setState((current) => ({
+        ...current,
+        status: 'error',
+        error: phaseRef.current === 'recitation'
+          ? 'Recitation could not be played. Check the download or your connection and try again.'
+          : 'Translation speech could not be played.',
+      }));
     } else if (playerStatus.didJustFinish) {
       advanceRef.current(sessionRef.current);
     } else if (playerStatus.playing) {
@@ -207,10 +220,11 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     void setAudioModeAsync({ playsInSilentMode: true, interruptionMode: 'doNotMix', shouldPlayInBackground: true });
   }, []);
 
-  const play = useCallback((verses: PlaybackVerse[], mode: PlaybackMode, reciterId: ReciterId, language = 'en', voice?: string, rate = 0.9, pitch = 1, volume = 1, repeats: PlaybackRepeats = { range: 1, ayah: 1 }) => {
+  const play = useCallback((verses: PlaybackVerse[], mode: PlaybackMode, reciterId: ReciterId, language = 'en', voice: VoiceProfileId = DEFAULT_VOICE_PROFILE_ID, rate = 0.9, pitch = 1, volume = 1, repeats: PlaybackRepeats = { range: 1, ayah: 1 }) => {
     sessionRef.current += 1;
+    pausedRef.current = false;
+    readySessionRef.current = 0;
     player.pause();
-    void Speech.stop();
     queueRef.current = {
       verses,
       mode,
@@ -232,10 +246,10 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     beginAt(indexRef.current, sessionRef.current);
   }, [beginAt, player]);
 
-  const speakSurah = useCallback((verses: TranslationVerse[], language: string, voice?: string, rate?: number, pitch?: number, volume?: number) => {
+  const speakSurah = useCallback((verses: TranslationVerse[], language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => {
     play(verses, 'translation', 'husary', language, voice, rate, pitch, volume);
   }, [play]);
-  const speakAyah = useCallback((verse: TranslationVerse, language: string, voice?: string, rate?: number, pitch?: number, volume?: number) => {
+  const speakAyah = useCallback((verse: TranslationVerse, language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => {
     play([verse], 'translation', 'husary', language, voice, rate, pitch, volume);
   }, [play]);
 
@@ -247,30 +261,42 @@ export function SpeechProvider({ children }: PropsWithChildren) {
 
   const stop = useCallback(async () => {
     sessionRef.current += 1;
+    pausedRef.current = false;
+    readySessionRef.current = 0;
     queueRef.current = null;
     phaseRef.current = null;
     player.pause();
-    await Speech.stop();
+    if (localAudioUriRef.current) releaseDownloadedRecitationUri(localAudioUriRef.current);
+    localAudioUriRef.current = null;
+    if (translationAudioUriRef.current) releaseUniformSpeechUri(translationAudioUriRef.current);
+    translationAudioUriRef.current = null;
     setState((current) => ({ ...current, status: 'idle', phase: null, error: null }));
   }, [player]);
   const reset = useCallback(async () => { await stop(); indexRef.current = 0; setState(initialState); }, [stop]);
 
   const pause = useCallback(async () => {
     if (state.status !== 'speaking' && state.status !== 'loading') return;
-    if (phaseRef.current === 'recitation') player.pause();
-    else if (Platform.OS === 'ios') await Speech.pause();
-    else { sessionRef.current += 1; await Speech.stop(); }
+    pausedRef.current = true;
+    player.pause();
     setState((current) => ({ ...current, status: 'paused' }));
   }, [player, state.status]);
 
   const resume = useCallback(async () => {
     if (state.status !== 'paused' || !queueRef.current) return;
-    if (phaseRef.current === 'recitation') { player.play(); setState((current) => ({ ...current, status: 'speaking' })); }
-    else if (Platform.OS === 'ios') { await Speech.resume(); setState((current) => ({ ...current, status: 'speaking' })); }
-    else { sessionRef.current += 1; beginTranslation(indexRef.current, sessionRef.current); }
-  }, [beginTranslation, player, state.status]);
+    pausedRef.current = false;
+    if (readySessionRef.current === sessionRef.current) {
+      player.play();
+      setState((current) => ({ ...current, status: 'speaking' }));
+    } else {
+      setState((current) => ({ ...current, status: 'loading' }));
+    }
+  }, [player, state.status]);
 
-  useEffect(() => () => { player.pause(); void Speech.stop(); }, [player]);
+  useEffect(() => () => {
+    player.pause();
+    if (localAudioUriRef.current) releaseDownloadedRecitationUri(localAudioUriRef.current);
+    if (translationAudioUriRef.current) releaseUniformSpeechUri(translationAudioUriRef.current);
+  }, [player]);
 
   const value = useMemo(() => ({ ...state, speakAyah, speakSurah, play, pause, resume, setVolume, stop, reset }), [pause, play, reset, resume, setVolume, speakAyah, speakSurah, state, stop]);
   return <SpeechContext.Provider value={value}>{children}</SpeechContext.Provider>;

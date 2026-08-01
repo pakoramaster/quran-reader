@@ -16,6 +16,7 @@ import {
 } from '@/features/annotations/data/annotationRepository';
 import { AnnotationEditor } from '@/features/annotations/ui/AnnotationEditor';
 import { getAyah } from '@/features/quran-reader/data/quranRepository';
+import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
 import { listTranslations } from '@/features/translations/data/translationRepository';
 import { requestConfirmation, showMessage } from '@/platform/dialogs/dialogs';
 import { FolioTextInput } from '@/platform/ui/FolioTextInput';
@@ -28,6 +29,7 @@ export default function NotesScreen() {
   const db = useUserDatabase();
   const quranDb = useSQLiteContext();
   const queryClient = useQueryClient();
+  const readingFontSize = useReadingFontSize();
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
   const [translationId, setTranslationId] = useState<string | null>(null);
@@ -184,9 +186,10 @@ export default function NotesScreen() {
           </>
         )}
         renderItem={({ item }) => (
-          <AnnotationCard
-            annotation={item}
-            deleting={deleteMutation.isPending && deleteMutation.variables?.verseKey === item.verseKey}
+            <AnnotationCard
+              annotation={item}
+              deleting={deleteMutation.isPending && deleteMutation.variables?.verseKey === item.verseKey}
+              fontScale={readingFontSize.scale}
             onDelete={confirmDelete}
             onEdit={(annotation) => void editAnnotation(annotation)}
           />
@@ -210,11 +213,12 @@ export default function NotesScreen() {
 interface AnnotationCardProps {
   annotation: AnnotatedAyah;
   deleting: boolean;
+  fontScale?: number;
   onDelete: (annotation: AnnotatedAyah) => void;
   onEdit: (annotation: AnnotatedAyah) => void;
 }
 
-export function AnnotationCard({ annotation, deleting, onDelete, onEdit }: AnnotationCardProps) {
+export function AnnotationCard({ annotation, deleting, fontScale = 1, onDelete, onEdit }: AnnotationCardProps) {
   return (
     <View
       style={[
@@ -236,8 +240,8 @@ export function AnnotationCard({ annotation, deleting, onDelete, onEdit }: Annot
           <Text numberOfLines={1} style={styles.translationTitle}>{annotation.translationTitle}</Text>
           <Ionicons color={colors.gold} name="arrow-forward" size={18} />
         </View>
-        {annotation.noteText ? <Text style={styles.noteText}>{annotation.noteText}</Text> : null}
-        <Text numberOfLines={3} style={styles.verseText}>{annotation.translationText}</Text>
+        {annotation.noteText ? <Text style={[styles.noteText, { fontSize: 21 * fontScale, lineHeight: 26 * fontScale }]}>{annotation.noteText}</Text> : null}
+        <Text numberOfLines={3} style={[styles.verseText, { fontSize: 16 * fontScale, lineHeight: 21 * fontScale }]}>{annotation.translationText}</Text>
         <Text style={styles.updated}>Updated {new Date(annotation.updatedAt).toLocaleDateString()}</Text>
       </Pressable>
       <View style={styles.noteActions}>
@@ -286,10 +290,18 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colors.emerald, borderColor: colors.emerald },
   chipLabel: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 14 },
   chipLabelActive: { color: colors.paperLight },
-  colorRow: { flexDirection: 'row', gap: 11, paddingHorizontal: 4, paddingVertical: 4 },
+  colorRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    overflow: 'visible',
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
   list: { paddingBottom: 90 },
-  colorChip: { alignItems: 'center', borderColor: colors.border, borderRadius: 18, borderWidth: 2, height: 36, justifyContent: 'center', width: 36 },
-  colorChipActive: { borderColor: colors.emerald, transform: [{ scale: 1.1 }] },
+  colorChip: { alignItems: 'center', borderColor: colors.border, borderRadius: 20, borderWidth: 2, height: 40, justifyContent: 'center', width: 40 },
+  colorChipActive: { borderColor: colors.emerald, borderWidth: 4 },
   allColor: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 9 },
   noteCard: { backgroundColor: colors.paperLight, borderColor: colors.border, borderRadius: 3, borderWidth: 1, marginTop: 14, overflow: 'hidden' },
   noteContent: { padding: 16 },

@@ -2,7 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { normalizeTranslationText } from '@/features/translations/domain/translationText';
 
-const VERSION = 3;
+const VERSION = 4;
 
 export async function migrateUserDatabase(db: SQLiteDatabase): Promise<void> {
   await db.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
@@ -149,6 +149,19 @@ export async function migrateUserDatabase(db: SQLiteDatabase): Promise<void> {
         CREATE UNIQUE INDEX IF NOT EXISTS annotations_verse
           ON annotations(surah_number, ayah_number);
         PRAGMA user_version = 3;
+      `);
+    }
+    if (currentVersion < 4) {
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS recitation_downloads (
+          reciter_id TEXT NOT NULL,
+          surah_number INTEGER NOT NULL CHECK (surah_number BETWEEN 1 AND 114),
+          verse_count INTEGER NOT NULL CHECK (verse_count > 0),
+          byte_count INTEGER NOT NULL CHECK (byte_count >= 0),
+          downloaded_at INTEGER NOT NULL,
+          PRIMARY KEY (reciter_id, surah_number)
+        ) STRICT;
+        PRAGMA user_version = 4;
       `);
     }
   });

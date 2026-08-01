@@ -20,6 +20,7 @@ async function resolveStartUrl() {
 
   const appRoot = app.isPackaged ? app.getAppPath() : path.resolve(__dirname, '..');
   localServer = await startStaticServer({
+    dataRoot: app.getPath('userData'),
     port: productionPort,
     webRoot: path.join(appRoot, 'dist'),
   });

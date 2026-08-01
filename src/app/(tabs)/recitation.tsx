@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
-import * as Speech from 'expo-speech';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, type ViewToken } from 'react-native';
@@ -12,12 +11,12 @@ import { listAyahsInRange, listSurahs } from '@/features/quran-reader/data/quran
 import { DEFAULT_RECITER_ID, getReciter, isReciterId, RECITERS, type ReciterId } from '@/features/recitation/domain/reciters';
 import { CompactVolumeControl } from '@/features/recitation/ui/CompactVolumeControl';
 import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
+import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
 import {
   DEFAULT_VOICE_PROFILE_ID,
   getVoiceProfile,
   isVoiceProfileId,
-  resolveVoiceForProfile,
 } from '@/features/speech/domain/voiceProfiles';
 import { listTranslations, listTranslationVersesInRange } from '@/features/translations/data/translationRepository';
 import { colors, fontFamilies, spacing } from '@/theme/tokens';
@@ -54,6 +53,7 @@ export default function RecitationScreen() {
   const quranDb = useSQLiteContext();
   const userDb = useUserDatabase();
   const speech = useSpeech();
+  const readingFontSize = useReadingFontSize();
   const verseListRef = useRef<FlatList<PlaybackRow>>(null);
   const volumeSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -61,7 +61,6 @@ export default function RecitationScreen() {
   const [selectedVerseKey, setSelectedVerseKey] = useState<VerseKey | null>(null);
   const [followingPlayback, setFollowingPlayback] = useState(true);
   const [visibleSurahs, setVisibleSurahs] = useState<{ first: number; last: number } | null>(null);
-  const [voices, setVoices] = useState<Speech.Voice[]>([]);
   const [reciterOverride, setReciterOverride] = useState<ReciterId | null | undefined>();
   const [translationOverride, setTranslationOverride] = useState<string | null | undefined>();
   const [startOverride, setStartOverride] = useState<number>();
@@ -118,9 +117,6 @@ export default function RecitationScreen() {
     }),
   });
 
-  useEffect(() => {
-    void Speech.getAvailableVoicesAsync().then(setVoices).catch(() => setVoices([]));
-  }, []);
   useEffect(() => () => {
     if (volumeSaveTimerRef.current) clearTimeout(volumeSaveTimerRef.current);
   }, []);
@@ -138,7 +134,6 @@ export default function RecitationScreen() {
   const volume = volumeOverride ?? bounded(stored.data?.volume ?? null, 0.8, 0, 1);
   const voiceProfileId = isVoiceProfileId(stored.data?.voiceProfile) ? stored.data.voiceProfile : DEFAULT_VOICE_PROFILE_ID;
   const voiceProfile = getVoiceProfile(voiceProfileId);
-  const voice = translation ? resolveVoiceForProfile(voices, translation.language, voiceProfileId) : undefined;
   const startName = surahs.data?.[startSurah - 1]?.nameTransliterated ?? `Surah ${startSurah}`;
   const endName = surahs.data?.[endSurah - 1]?.nameTransliterated ?? `Surah ${endSurah}`;
   const hasSource = Boolean(reciterId || translation);
@@ -231,9 +226,9 @@ export default function RecitationScreen() {
       mode,
       reciterId ?? DEFAULT_RECITER_ID,
       translation?.language,
-      voice?.identifier,
+      voiceProfileId,
       voiceProfile.rate,
-      voiceProfile.pitch,
+      1,
       volume,
       { range: rangeRepeat, ayah: ayahRepeat, startAt },
     );
@@ -355,9 +350,9 @@ export default function RecitationScreen() {
                       <Text style={styles.verseKey}>AYAH {item.key}</Text>
                       {playing ? <Text style={styles.playingLabel}>{speech.phase === 'translation' ? 'TRANSLATION' : 'RECITING'}</Text> : selected ? <Text style={styles.selectedLabel}>START HERE</Text> : null}
                     </View>
-                    <Text selectable style={styles.verseArabic}>{item.arabic} <Text style={styles.verseNumber}>﴿{item.ayahNumber}﴾</Text></Text>
+                    <Text selectable style={[styles.verseArabic, { fontSize: 28 * readingFontSize.scale, lineHeight: 48 * readingFontSize.scale }]}>{item.arabic} <Text style={[styles.verseNumber, { fontSize: 20 * readingFontSize.scale }]}>﴿{item.ayahNumber}﴾</Text></Text>
                     {item.translation ? <View style={styles.verseRule} /> : null}
-                    {item.translation ? <Text selectable style={styles.verseTranslation}>{item.translation}</Text> : null}
+                    {item.translation ? <Text selectable style={[styles.verseTranslation, { fontSize: 18 * readingFontSize.scale, lineHeight: 25 * readingFontSize.scale }]}>{item.translation}</Text> : null}
                   </Pressable>
                 </>
               );

@@ -11,25 +11,35 @@ interface ResponseResult {
   status: number;
 }
 
-function request(url: string, method = 'GET'): Promise<ResponseResult> {
+function request(url: string, method = 'GET', body?: string): Promise<ResponseResult> {
   return new Promise((resolve, reject) => {
-    const outgoing = http.request(url, { method }, (response) => {
+    const outgoing = http.request(url, {
+      headers: body ? { 'Content-Length': Buffer.byteLength(body), 'Content-Type': 'application/json' } : undefined,
+      method,
+    }, (response) => {
       let body = '';
       response.setEncoding('utf8');
       response.on('data', (chunk) => { body += chunk; });
       response.on('end', () => resolve({ body, headers: response.headers, status: response.statusCode ?? 0 }));
     });
     outgoing.on('error', reject);
+    if (body) outgoing.write(body);
     outgoing.end();
   });
 }
 
 describe('desktop static server', () => {
   let server: { close: () => void; url: string };
+  let voiceReady = false;
 
   beforeAll(async () => {
     server = await startStaticServer({
       port: 0,
+      ttsService: {
+        ensureModel: async () => { voiceReady = true; },
+        ready: () => voiceReady,
+        synthesize: async () => Buffer.from('RIFFmock'),
+      },
       webRoot: path.resolve(__dirname, '../fixtures/desktop-web'),
     });
   });
@@ -63,5 +73,18 @@ describe('desktop static server', () => {
 
   it('supports HEAD without returning a body', async () => {
     await expect(request(`${server.url}/app.js`, 'HEAD')).resolves.toMatchObject({ body: '', status: 200 });
+  });
+
+  it('prepares the standard voice model and serves synthesized WAV audio', async () => {
+    await expect(request(`${server.url}/api/tts/status`)).resolves.toMatchObject({ body: '{"ready":false}', status: 200 });
+    await expect(request(`${server.url}/api/tts/status?ensure=1`)).resolves.toMatchObject({ body: '{"ready":true}', status: 200 });
+    const speech = await request(`${server.url}/api/tts`, 'POST', JSON.stringify({
+      speakerId: 2,
+      speed: 0.9,
+      text: 'A standard voice.',
+    }));
+    expect(speech.status).toBe(200);
+    expect(speech.headers['content-type']).toBe('audio/wav');
+    expect(speech.body).toBe('RIFFmock');
   });
 });

@@ -31,7 +31,7 @@ class MigrationTestDatabase {
   }
 }
 
-describe('user database migration v3', () => {
+describe('user database migrations', () => {
   let database: MigrationTestDatabase;
 
   beforeEach(() => {
@@ -89,7 +89,7 @@ describe('user database migration v3', () => {
       }),
     ]);
     expect(database.sqlite.prepare('PRAGMA user_version').get()).toEqual(
-      expect.objectContaining({ user_version: 3 }),
+        expect.objectContaining({ user_version: 4 }),
     );
     expect(() => insert.run('third-translation', 2, 255, 'Duplicate', null, 40, 400))
       .toThrow(/UNIQUE constraint failed/);
