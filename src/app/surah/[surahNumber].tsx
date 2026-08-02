@@ -17,6 +17,8 @@ import { getSetting, setSetting } from '@/features/settings/data/settingsReposit
 import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
 import { primeUniformSpeech } from '@/features/speech/data/uniformTtsEngine';
+import { DEFAULT_SPEECH_ENGINE_ID, isSpeechEngineId } from '@/features/speech/domain/speechEngines';
+import { DEFAULT_SYSTEM_VOICE_ID } from '@/features/speech/domain/systemVoices';
 import { DEFAULT_VOICE_PROFILE_ID, isVoiceProfileId } from '@/features/speech/domain/voiceProfiles';
 import { getTtsSpeed, isTtsSpeedId } from '@/features/speech/domain/ttsSpeeds';
 import { getActiveTranslationId, getTranslation, listTranslationVerses } from '@/features/translations/data/translationRepository';
@@ -67,6 +69,8 @@ export default function SurahReaderScreen() {
     queryFn: async () => ({
       profile: await getSetting(userDb, 'tts_voice_profile'),
       speed: await getSetting(userDb, 'tts_speed'),
+      engine: await getSetting(userDb, 'tts_engine'),
+      systemVoice: await getSetting(userDb, 'tts_system_voice'),
     }),
     enabled: Boolean(activeTranslation.data?.language),
   });
@@ -81,6 +85,8 @@ export default function SurahReaderScreen() {
   const reciterId = reciterIdOverride ?? (isReciterId(storedReciter) ? storedReciter : DEFAULT_RECITER_ID);
   const voiceProfileId = isVoiceProfileId(speechSettings.data?.profile) ? speechSettings.data.profile : DEFAULT_VOICE_PROFILE_ID;
   const voiceSpeed = getTtsSpeed(isTtsSpeedId(speechSettings.data?.speed) ? speechSettings.data.speed : null);
+  const speechEngineId = isSpeechEngineId(speechSettings.data?.engine) ? speechSettings.data.engine : DEFAULT_SPEECH_ENGINE_ID;
+  const systemVoiceId = speechSettings.data?.systemVoice || DEFAULT_SYSTEM_VOICE_ID;
   const annotations = useQuery({
     queryKey: ['annotations', surahNumber],
     queryFn: () => listAnnotationsForSurah(userDb, surahNumber),
@@ -98,7 +104,7 @@ export default function SurahReaderScreen() {
   }, [annotations.data, arabicAyahs.data, translatedAyahs.data]);
 
   useEffect(() => {
-    if (playbackMode === 'recitation' || !activeTranslation.data) return undefined;
+    if (speechEngineId !== 'kokoro' || playbackMode === 'recitation' || !activeTranslation.data) return undefined;
     const controller = new AbortController();
     const firstAyah = selectedAyahNumber ?? spokenAyahNumber ?? (targetAyah > 0 ? targetAyah : 1);
     const texts = readerAyahs
@@ -107,7 +113,7 @@ export default function SurahReaderScreen() {
       .map((verse) => verse.translationText!);
     void primeUniformSpeech(texts, voiceProfileId, voiceSpeed.value, controller.signal).catch(() => undefined);
     return () => controller.abort();
-  }, [activeTranslation.data, playbackMode, readerAyahs, selectedAyahNumber, spokenAyahNumber, targetAyah, voiceProfileId, voiceSpeed.value]);
+  }, [activeTranslation.data, playbackMode, readerAyahs, selectedAyahNumber, speechEngineId, spokenAyahNumber, targetAyah, voiceProfileId, voiceSpeed.value]);
 
   useEffect(() => {
     if (targetAyah > 0 && readerAyahs.length >= targetAyah) {
@@ -172,6 +178,8 @@ export default function SurahReaderScreen() {
       playbackMode,
       reciterId,
       activeTranslation.data?.language,
+      speechEngineId,
+      systemVoiceId,
       voiceProfileId,
       voiceSpeed.value,
       1,
@@ -308,7 +316,17 @@ export default function SurahReaderScreen() {
                     onPress={(event) => {
                       event.stopPropagation();
                       setSpokenAyahNumber(item.ayahNumber);
-                      speech.play([{ key: item.verseKey, text: item.translationText ?? '' }], playbackMode, reciterId, activeTranslation.data?.language, voiceProfileId, voiceSpeed.value, 1);
+                      speech.play(
+                        [{ key: item.verseKey, text: item.translationText ?? '' }],
+                        playbackMode,
+                        reciterId,
+                        activeTranslation.data?.language,
+                        speechEngineId,
+                        systemVoiceId,
+                        voiceProfileId,
+                        voiceSpeed.value,
+                        1,
+                      );
                     }}
                     style={styles.iconButton}
                   >

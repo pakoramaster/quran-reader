@@ -46,16 +46,24 @@ export async function warmUniformVoiceEngine(): Promise<void> {
   await ensureUniformVoiceModel();
 }
 
-export async function synthesizeUniformSpeech(text: string, profileId: VoiceProfileId, speed = 1): Promise<string> {
+export async function synthesizeUniformSpeech(
+  text: string,
+  profileId: VoiceProfileId,
+  speed = 1,
+  priority: 'foreground' | 'background' = 'foreground',
+  signal?: AbortSignal,
+): Promise<string> {
   const profile = getVoiceProfile(profileId);
   const response = await fetch('/api/tts', {
     body: JSON.stringify({
       text,
       speakerId: profile.speakerId,
       speed: clampTtsSpeed(speed),
+      priority,
     }),
     headers: { 'Content-Type': 'application/json' },
     method: 'POST',
+    signal,
   });
   if (!response.ok) throw await responseError(response, 'Translation speech could not be generated.');
   return URL.createObjectURL(await response.blob());
@@ -64,7 +72,7 @@ export async function synthesizeUniformSpeech(text: string, profileId: VoiceProf
 export async function primeUniformSpeech(texts: string[], profileId: VoiceProfileId, speed = 1, signal?: AbortSignal): Promise<void> {
   for (const text of texts) {
     if (signal?.aborted) return;
-    const uri = await synthesizeUniformSpeech(text, profileId, speed);
+    const uri = await synthesizeUniformSpeech(text, profileId, speed, 'background', signal);
     releaseUniformSpeechUri(uri);
   }
 }

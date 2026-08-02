@@ -137,10 +137,11 @@ function createRequestHandler(webRoot, ttsService = null) {
         const text = typeof body?.text === 'string' ? body.text.trim() : '';
         const speakerId = Number(body?.speakerId);
         const speed = Number(body?.speed);
+        const priority = body?.priority === 'background' ? 'background' : 'foreground';
         if (!text || text.length > 20_000) throw new Error('Translation text must contain between 1 and 20,000 characters.');
         if (!Number.isInteger(speakerId) || !standardVoiceSpeakerIds.has(speakerId)) throw new Error('The selected standard voice is invalid.');
         if (!Number.isFinite(speed) || speed < 0.5 || speed > 2) throw new Error('The selected speech speed is invalid.');
-        const wav = await ttsService.synthesize({ text, speakerId, speed });
+        const wav = await ttsService.synthesize({ text, speakerId, speed, priority });
         send(response, method, 200, {
           'Cache-Control': 'no-store',
           'Content-Length': wav.length,

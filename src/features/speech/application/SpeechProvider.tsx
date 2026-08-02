@@ -1,10 +1,15 @@
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react';
 
+import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { type PlaybackMode, type ReciterId } from '@/features/recitation/domain/reciters';
 import { releaseDownloadedRecitationUri } from '@/features/recitation/data/recitationFileStore';
 import { resolveRecitationPlaybackSource } from '@/features/recitation/data/recitationPlaybackSource';
+import { getSetting } from '@/features/settings/data/settingsRepository';
+import { pauseSystemVoice, resumeSystemVoice, speakWithSystemVoice, stopSystemVoice, systemVoiceCanResume } from '@/features/speech/data/systemTtsEngine';
 import { releaseUniformSpeechUri, synthesizeUniformSpeech, warmUniformVoiceEngine } from '@/features/speech/data/uniformTtsEngine';
+import { DEFAULT_SPEECH_ENGINE_ID, isSpeechEngineId, type SpeechEngineId } from '@/features/speech/domain/speechEngines';
+import { DEFAULT_SYSTEM_VOICE_ID } from '@/features/speech/domain/systemVoices';
 import { getTtsSpeed } from '@/features/speech/domain/ttsSpeeds';
 import { DEFAULT_VOICE_PROFILE_ID, type VoiceProfileId } from '@/features/speech/domain/voiceProfiles';
 import { beginPlaybackSource, createPlaybackCompletionTracker, observePlaybackStatus } from '@/features/speech/domain/playbackCompletion';
@@ -27,13 +32,15 @@ interface PlaybackVerse extends TranslationVerse {
 }
 
 interface SpeechContextValue extends SpeechState {
-  speakAyah: (verse: TranslationVerse, language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => void;
-  speakSurah: (verses: TranslationVerse[], language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => void;
+  speakAyah: (verse: TranslationVerse, language: string, speechEngine?: SpeechEngineId, systemVoiceId?: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => void;
+  speakSurah: (verses: TranslationVerse[], language: string, speechEngine?: SpeechEngineId, systemVoiceId?: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => void;
   play: (
     verses: PlaybackVerse[],
     mode: PlaybackMode,
     reciterId: ReciterId,
     language?: string,
+    speechEngine?: SpeechEngineId,
+    systemVoiceId?: string,
     voice?: VoiceProfileId,
     rate?: number,
     pitch?: number,
@@ -58,6 +65,8 @@ interface QueueConfig {
   mode: PlaybackMode;
   reciterId: ReciterId;
   language: string;
+  speechEngine: SpeechEngineId;
+  systemVoiceId: string;
   voice: VoiceProfileId;
   rate: number;
   pitch: number;
@@ -98,6 +107,7 @@ function synthesizeTranslation(queue: QueueConfig, verse: PlaybackVerse): Promis
 }
 
 export function SpeechProvider({ children }: PropsWithChildren) {
+  const userDb = useUserDatabase();
   const [state, setState] = useState<SpeechState>(initialState);
   const player = useAudioPlayer(null, {
     crossOrigin: 'anonymous',
@@ -181,6 +191,33 @@ export function SpeechProvider({ children }: PropsWithChildren) {
         rangeIteration: rangeRunRef.current,
         rangeRepeat: queue.repeats.range,
       });
+      if (queue.speechEngine === 'system') {
+        void stopSystemVoice().then(() => {
+          if (session !== sessionRef.current || phaseRef.current !== 'translation') return;
+          speakWithSystemVoice(verse.text, {
+            language: queue.language,
+            pitch: queue.pitch,
+            rate: queue.rate,
+            volume: queue.volume,
+            voice: queue.systemVoiceId === DEFAULT_SYSTEM_VOICE_ID ? undefined : queue.systemVoiceId,
+            onStart: () => {
+              if (session !== sessionRef.current) return;
+              readySessionRef.current = session;
+              setState((current) => ({ ...current, status: pausedRef.current ? 'paused' : 'speaking', error: null }));
+              if (pausedRef.current) void pauseSystemVoice();
+            },
+            onDone: () => {
+              if (session === sessionRef.current && !pausedRef.current) advanceRef.current(session);
+            },
+            onStopped: () => undefined,
+            onError: (error) => {
+              if (session !== sessionRef.current) return;
+              setState((current) => ({ ...current, status: 'error', error: error.message || 'Translation speech failed.' }));
+            },
+          });
+        });
+        return;
+      }
       const synthesis = prepareTranslation(index, session, queue);
       if (!synthesis) return;
       void synthesis
@@ -243,7 +280,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
         readySessionRef.current = session;
         if (pausedRef.current) setState((current) => ({ ...current, status: 'paused' }));
         else player.play();
-        if (queue.mode === 'both') prefetchTranslations(index, session, queue, TRANSLATION_PREFETCH_AHEAD + 1);
+        if (queue.mode === 'both' && queue.speechEngine === 'kokoro') prefetchTranslations(index, session, queue, TRANSLATION_PREFETCH_AHEAD + 1);
       });
     },
     [player, prefetchTranslations],
@@ -298,6 +335,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
   }, [advance]);
   useEffect(() => {
     if (!phaseRef.current) return;
+    if (phaseRef.current === 'translation' && queueRef.current?.speechEngine === 'system') return;
     const playbackEvent = playerStatus.error
       ? null
       : observePlaybackStatus(playbackCompletionRef.current, {
@@ -339,8 +377,12 @@ export function SpeechProvider({ children }: PropsWithChildren) {
       interruptionMode: 'doNotMix',
       shouldPlayInBackground: true,
     });
-    void warmUniformVoiceEngine().catch(() => undefined);
-  }, []);
+    void getSetting(userDb, 'tts_engine').then((stored) => {
+      const selected = isSpeechEngineId(stored) ? stored : DEFAULT_SPEECH_ENGINE_ID;
+      if (selected === 'kokoro') return warmUniformVoiceEngine();
+      return undefined;
+    }).catch(() => undefined);
+  }, [userDb]);
 
   const play = useCallback(
     (
@@ -348,6 +390,8 @@ export function SpeechProvider({ children }: PropsWithChildren) {
       mode: PlaybackMode,
       reciterId: ReciterId,
       language = 'en',
+      speechEngine: SpeechEngineId = DEFAULT_SPEECH_ENGINE_ID,
+      systemVoiceId = DEFAULT_SYSTEM_VOICE_ID,
       voice: VoiceProfileId = DEFAULT_VOICE_PROFILE_ID,
       rate = getTtsSpeed(null).value,
       pitch = 1,
@@ -356,6 +400,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     ) => {
       clearTranslationCache();
       sessionRef.current += 1;
+      void stopSystemVoice();
       pausedRef.current = false;
       readySessionRef.current = 0;
       player.pause();
@@ -364,6 +409,8 @@ export function SpeechProvider({ children }: PropsWithChildren) {
         mode,
         reciterId,
         language,
+        speechEngine,
+        systemVoiceId,
         voice,
         rate,
         pitch,
@@ -383,14 +430,14 @@ export function SpeechProvider({ children }: PropsWithChildren) {
   );
 
   const speakSurah = useCallback(
-    (verses: TranslationVerse[], language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => {
-      play(verses, 'translation', 'husary', language, voice, rate, pitch, volume);
+    (verses: TranslationVerse[], language: string, speechEngine?: SpeechEngineId, systemVoiceId?: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => {
+      play(verses, 'translation', 'husary', language, speechEngine, systemVoiceId, voice, rate, pitch, volume);
     },
     [play],
   );
   const speakAyah = useCallback(
-    (verse: TranslationVerse, language: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => {
-      play([verse], 'translation', 'husary', language, voice, rate, pitch, volume);
+    (verse: TranslationVerse, language: string, speechEngine?: SpeechEngineId, systemVoiceId?: string, voice?: VoiceProfileId, rate?: number, pitch?: number, volume?: number) => {
+      play([verse], 'translation', 'husary', language, speechEngine, systemVoiceId, voice, rate, pitch, volume);
     },
     [play],
   );
@@ -412,6 +459,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
     queueRef.current = null;
     phaseRef.current = null;
     player.pause();
+    await stopSystemVoice();
     if (localAudioUriRef.current) releaseDownloadedRecitationUri(localAudioUriRef.current);
     localAudioUriRef.current = null;
     setState((current) => ({
@@ -430,25 +478,36 @@ export function SpeechProvider({ children }: PropsWithChildren) {
   const pause = useCallback(async () => {
     if (state.status !== 'speaking' && state.status !== 'loading') return;
     pausedRef.current = true;
-    player.pause();
+    if (phaseRef.current === 'translation' && queueRef.current?.speechEngine === 'system') await pauseSystemVoice();
+    else player.pause();
     setState((current) => ({ ...current, status: 'paused' }));
   }, [player, state.status]);
 
   const resume = useCallback(async () => {
     if (state.status !== 'paused' || !queueRef.current) return;
     pausedRef.current = false;
+    if (phaseRef.current === 'translation' && queueRef.current.speechEngine === 'system') {
+      if (systemVoiceCanResume()) {
+        await resumeSystemVoice();
+        setState((current) => ({ ...current, status: 'speaking' }));
+      } else {
+        beginTranslation(indexRef.current, sessionRef.current);
+      }
+      return;
+    }
     if (readySessionRef.current === sessionRef.current) {
       player.play();
       setState((current) => ({ ...current, status: 'speaking' }));
     } else {
       setState((current) => ({ ...current, status: 'loading' }));
     }
-  }, [player, state.status]);
+  }, [beginTranslation, player, state.status]);
 
   useEffect(
     () => () => {
       clearTranslationCache();
       player.pause();
+      void stopSystemVoice();
       if (localAudioUriRef.current) releaseDownloadedRecitationUri(localAudioUriRef.current);
     },
     [clearTranslationCache, player],

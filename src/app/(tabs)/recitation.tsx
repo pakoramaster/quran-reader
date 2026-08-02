@@ -14,6 +14,8 @@ import { getSetting, setSetting } from '@/features/settings/data/settingsReposit
 import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
 import { primeUniformSpeech } from '@/features/speech/data/uniformTtsEngine';
+import { DEFAULT_SPEECH_ENGINE_ID, isSpeechEngineId } from '@/features/speech/domain/speechEngines';
+import { DEFAULT_SYSTEM_VOICE_ID } from '@/features/speech/domain/systemVoices';
 import { DEFAULT_VOICE_PROFILE_ID, isVoiceProfileId } from '@/features/speech/domain/voiceProfiles';
 import { getTtsSpeed, isTtsSpeedId } from '@/features/speech/domain/ttsSpeeds';
 import { listTranslations, listTranslationVersesInRange } from '@/features/translations/data/translationRepository';
@@ -113,6 +115,8 @@ export default function RecitationScreen() {
       volume: await getSetting(userDb, keys.volume),
       voiceProfile: await getSetting(userDb, 'tts_voice_profile'),
       voiceSpeed: await getSetting(userDb, 'tts_speed'),
+      speechEngine: await getSetting(userDb, 'tts_engine'),
+      systemVoice: await getSetting(userDb, 'tts_system_voice'),
     }),
   });
 
@@ -134,6 +138,8 @@ export default function RecitationScreen() {
   const volume = volumeOverride ?? bounded(stored.data?.volume ?? null, 0.8, 0, 1);
   const voiceProfileId = isVoiceProfileId(stored.data?.voiceProfile) ? stored.data.voiceProfile : DEFAULT_VOICE_PROFILE_ID;
   const voiceSpeed = getTtsSpeed(isTtsSpeedId(stored.data?.voiceSpeed) ? stored.data.voiceSpeed : null);
+  const speechEngineId = isSpeechEngineId(stored.data?.speechEngine) ? stored.data.speechEngine : DEFAULT_SPEECH_ENGINE_ID;
+  const systemVoiceId = stored.data?.systemVoice || DEFAULT_SYSTEM_VOICE_ID;
   const startName = surahs.data?.[startSurah - 1]?.nameTransliterated ?? `Surah ${startSurah}`;
   const endName = surahs.data?.[endSurah - 1]?.nameTransliterated ?? `Surah ${endSurah}`;
   const hasSource = Boolean(reciterId || translation);
@@ -164,12 +170,12 @@ export default function RecitationScreen() {
   );
 
   useEffect(() => {
-    if (!translation) return undefined;
+    if (!translation || speechEngineId !== 'kokoro') return undefined;
     const controller = new AbortController();
     const texts = playbackRows.slice(selectedIndex, selectedIndex + 3).flatMap((verse) => (verse.translation ? [verse.translation] : []));
     void primeUniformSpeech(texts, voiceProfileId, voiceSpeed.value, controller.signal).catch(() => undefined);
     return () => controller.abort();
-  }, [playbackRows, selectedIndex, translation, voiceProfileId, voiceSpeed.value]);
+  }, [playbackRows, selectedIndex, speechEngineId, translation, voiceProfileId, voiceSpeed.value]);
   const currentIndex = playbackRows.findIndex((verse) => verse.key === speech.currentVerseKey);
   const currentSurahNumber = currentIndex >= 0 ? (playbackRows[currentIndex]?.surahNumber ?? null) : null;
   const visibleSurahDistance =
@@ -242,6 +248,8 @@ export default function RecitationScreen() {
       mode,
       reciterId ?? DEFAULT_RECITER_ID,
       translation?.language,
+      speechEngineId,
+      systemVoiceId,
       voiceProfileId,
       voiceSpeed.value,
       1,
