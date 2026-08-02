@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FolioButton } from '@/components/FolioButton';
@@ -15,6 +15,7 @@ import {
   downloadReciterRecitations,
   listRecitationDownloads,
   removeSurahRecitation,
+  type RecitationDownload,
   type ReciterDownloadProgress,
 } from '@/features/recitation/data/recitationDownloadRepository';
 import { RECITERS, type ReciterId } from '@/features/recitation/domain/reciters';
@@ -36,6 +37,7 @@ export default function RecitationDownloadsScreen() {
   const [reciterId, setReciterId] = useState<ReciterId>('husary');
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [allProgress, setAllProgress] = useState<(ReciterDownloadProgress & { reciterId: ReciterId }) | null>(null);
+  const downloadAllController = useRef<AbortController | null>(null);
   const surahs = useQuery({ queryKey: ['surahs'], queryFn: () => listSurahs(quranDb), staleTime: Infinity });
   const downloads = useQuery({ queryKey: ['recitation-downloads'], queryFn: () => listRecitationDownloads(userDb) });
   const downloadedBySurah = useMemo(() => new Map(downloads.data?.filter((item) => item.reciterId === reciterId).map((item) => [item.surahNumber, item])), [downloads.data, reciterId]);
@@ -59,23 +61,43 @@ export default function RecitationDownloadsScreen() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['recitation-downloads'] }),
   });
   const downloadAll = useMutation({
-    mutationFn: async ({ reciter, plans }: { reciter: ReciterId; plans: Surah[] }) =>
-      downloadReciterRecitations(userDb, reciter, plans, (next) => {
+    mutationFn: async ({ reciter, plans }: { reciter: ReciterId; plans: Surah[] }) => {
+      const controller = new AbortController();
+      downloadAllController.current = controller;
+      return downloadReciterRecitations(userDb, reciter, plans, (next) => {
         setAllProgress({ ...next, reciterId: reciter });
         setProgress({ reciterId: reciter, surahNumber: next.currentSurahNumber, completed: next.currentAyah, total: next.currentSurahTotalAyahs });
-      }),
-    onError: (error) => showMessage('Download interrupted', `${error instanceof Error ? error.message : 'The reciter could not be downloaded.'} Completed Surahs remain saved; retry to continue.`),
+      }, {
+        signal: controller.signal,
+        onSurahDownloaded: (completedDownload) => {
+          setProgress(null);
+          queryClient.setQueryData<RecitationDownload[]>(['recitation-downloads'], (current = []) => [
+            ...current.filter((item) => item.reciterId !== completedDownload.reciterId || item.surahNumber !== completedDownload.surahNumber),
+            completedDownload,
+          ]);
+        },
+      });
+    },
+    onError: (error) => {
+      if (isDownloadCancellation(error)) {
+        showMessage('Download cancelled', 'Completed Surahs remain available offline.');
+        return;
+      }
+      showMessage('Download interrupted', `${error instanceof Error ? error.message : 'The reciter could not be downloaded.'} Completed Surahs remain saved; retry to continue.`);
+    },
     onSuccess: ({ downloadedSurahs, skippedSurahs }) =>
       showMessage(
         downloadedSurahs ? 'Reciter downloaded' : 'Already downloaded',
         downloadedSurahs ? `${downloadedSurahs} Surahs were downloaded. ${skippedSurahs} already-downloaded Surahs were skipped.` : 'Every Surah for this reciter is already available offline.',
       ),
     onSettled: async () => {
+      downloadAllController.current = null;
       setAllProgress(null);
       setProgress(null);
       await queryClient.invalidateQueries({ queryKey: ['recitation-downloads'] });
     },
   });
+  useEffect(() => () => downloadAllController.current?.abort(), []);
   const totalBytes = downloads.data?.reduce((sum, item) => sum + item.byteCount, 0) ?? 0;
   const remainingSurahs = Math.max(0, (surahs.data?.length ?? 0) - downloadedBySurah.size);
   const busy = download.isPending || downloadAll.isPending || remove.isPending;
@@ -144,13 +166,22 @@ export default function RecitationDownloadsScreen() {
                 );
               })}
             </View>
-            <FolioButton
-              disabled={!remainingSurahs || busy || surahs.isLoading}
-              label={remainingSurahs ? `Download all · ${remainingSurahs} remaining` : 'All Surahs downloaded'}
-              loading={downloadAll.isPending}
-              onPress={confirmDownloadAll}
-              style={styles.downloadAll}
-            />
+            {downloadAll.isPending ? (
+              <FolioButton
+                accessibilityLabel="Cancel download all recitations"
+                label="Cancel download"
+                onPress={() => downloadAllController.current?.abort()}
+                style={styles.downloadAll}
+                variant="secondary"
+              />
+            ) : (
+              <FolioButton
+                disabled={!remainingSurahs || busy || surahs.isLoading}
+                label={remainingSurahs ? `Download all · ${remainingSurahs} remaining` : 'All Surahs downloaded'}
+                onPress={confirmDownloadAll}
+                style={styles.downloadAll}
+              />
+            )}
             {allProgress?.reciterId === reciterId ? (
               <Text style={styles.allProgress}>
                 {allProgress.completedSurahs} of {allProgress.totalSurahs} Surahs ready · Surah {allProgress.currentSurahNumber}, Ayah {allProgress.currentAyah} of {allProgress.currentSurahTotalAyahs}
@@ -200,6 +231,10 @@ export default function RecitationDownloadsScreen() {
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(0, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isDownloadCancellation(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 const styles = StyleSheet.create({

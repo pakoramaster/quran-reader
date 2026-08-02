@@ -44,6 +44,29 @@ async function renderEditor(ayah: ReaderAyah = makeAyah()) {
 }
 
 describe('AnnotationEditor', () => {
+  it('ignores parent refreshes when its editor props have not changed', async () => {
+    let verseKeyReads = 0;
+    const ayah = new Proxy(makeAyah(), {
+      get(target, property, receiver) {
+        if (property === 'verseKey') verseKeyReads += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const props = {
+      ayah,
+      visible: true,
+      saving: false,
+      onClose: jest.fn(),
+      onSave: jest.fn(),
+    };
+    const result = await render(React.createElement(AnnotationEditor, props));
+    const readsAfterMount = verseKeyReads;
+
+    await result.rerender(React.createElement(AnnotationEditor, props));
+
+    expect(verseKeyReads).toBe(readsAfterMount);
+  });
+
   it('defaults to no color and saves a null highlight', async () => {
     const { result, onSave } = await renderEditor();
 

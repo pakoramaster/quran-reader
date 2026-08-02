@@ -63,6 +63,7 @@ describe('desktop static server', () => {
     expect(response.headers['cross-origin-opener-policy']).toBe('same-origin');
     expect(response.headers['content-security-policy']).toContain("script-src 'self' 'wasm-unsafe-eval'");
     expect(response.headers['content-security-policy']).toContain("connect-src 'self' https://everyayah.com");
+    expect(response.headers['content-security-policy']).toContain('https://api.github.com https://raw.githubusercontent.com');
     expect(response.headers['content-security-policy']).toContain("media-src 'self' https://everyayah.com blob:");
     expect(response.headers['content-security-policy']).not.toContain(" 'unsafe-eval'");
     expect(response.headers['cache-control']).toContain('immutable');

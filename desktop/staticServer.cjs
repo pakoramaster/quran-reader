@@ -26,7 +26,7 @@ function setSecurityHeaders(response) {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    "connect-src 'self' https://everyayah.com",
+    "connect-src 'self' https://everyayah.com https://api.github.com https://raw.githubusercontent.com",
     "media-src 'self' https://everyayah.com blob:",
     "worker-src 'self' blob:",
     "object-src 'none'",

@@ -57,6 +57,7 @@ describe('recitation downloads', () => {
     ]);
     const runAsync = jest.fn().mockResolvedValue(undefined);
     const progress = jest.fn();
+    const onSurahDownloaded = jest.fn();
 
     const result = await downloadReciterRecitations(
       { getAllAsync, runAsync } as never,
@@ -67,12 +68,36 @@ describe('recitation downloads', () => {
         { number: 3, ayahCount: 3 },
       ],
       progress,
+      { onSurahDownloaded },
     );
 
     expect(downloadFile).toHaveBeenCalledTimes(5);
     expect(downloadFile).not.toHaveBeenCalledWith('husary', expect.stringMatching(/^1:/));
     expect(runAsync).toHaveBeenCalledTimes(2);
     expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ completedSurahs: 2, currentSurahNumber: 3, currentAyah: 3, skippedSurahs: 1, totalSurahs: 3 }));
+    expect(onSurahDownloaded).toHaveBeenCalledTimes(2);
+    expect(onSurahDownloaded).toHaveBeenNthCalledWith(1, expect.objectContaining({ reciterId: 'husary', surahNumber: 2 }));
     expect(result).toEqual({ downloadedSurahs: 2, skippedSurahs: 1, totalSurahs: 3 });
+  });
+
+  it('cancels a complete-reciter download without recording a partial Surah', async () => {
+    const controller = new AbortController();
+    downloadFile.mockImplementation(async () => {
+      controller.abort();
+      return 10;
+    });
+    const getAllAsync = jest.fn().mockResolvedValue([]);
+    const runAsync = jest.fn().mockResolvedValue(undefined);
+
+    await expect(downloadReciterRecitations(
+      { getAllAsync, runAsync } as never,
+      'husary',
+      [{ number: 1, ayahCount: 7 }],
+      undefined,
+      { signal: controller.signal },
+    )).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(runAsync).not.toHaveBeenCalled();
+    expect(deleteFiles).toHaveBeenCalledWith('husary', 1);
   });
 });

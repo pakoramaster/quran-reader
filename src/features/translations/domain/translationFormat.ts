@@ -89,7 +89,7 @@ function validateManifest(parsed: unknown, canonicalKeys: readonly VerseKey[]): 
   };
 }
 
-function slugFromFileName(fileName: string): string {
+export function quranDbTranslationIdFromFileName(fileName: string): string {
   const base = fileName.replace(/\.json$/i, '').toLowerCase();
   const slug = base.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'translation';
   return `quran-db-${slug}`.slice(0, 64).replace(/-+$/g, '');
@@ -155,7 +155,7 @@ function validateQuranDb(parsed: unknown, canonicalKeys: readonly VerseKey[], fi
     manifest: {
       format: 'quran-translation',
       version: 1,
-      id: slugFromFileName(fileName),
+      id: quranDbTranslationIdFromFileName(fileName),
       title: translator!,
       language: translator!.toLowerCase() === 'arabic' ? 'ar' : 'en',
       translator: translator!,

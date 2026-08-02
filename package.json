@@ -1,6 +1,6 @@
 {
   "name": "quran-folio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "An offline-first Quran reader for mobile and Windows.",
   "author": "Quran Folio contributors",
   "private": true,
@@ -40,6 +40,7 @@
       "dist/**/*",
       "package.json",
       "!node_modules/**/*",
+      "dist/assets/node_modules/**/*",
       "node_modules/sherpa-onnx-node/**/*",
       "node_modules/sherpa-onnx-win-x64/**/*",
       "node_modules/tar-stream/**/*",

@@ -57,6 +57,7 @@ export default function RootLayout() {
                     <Stack.Screen name="(tabs)" />
                     <Stack.Screen name="surah/[surahNumber]" />
                     <Stack.Screen name="translations/import" options={{ presentation: 'modal' }} />
+                    <Stack.Screen name="translations/download" options={{ presentation: 'modal' }} />
                     <Stack.Screen name="translations/import-preview" options={{ presentation: 'modal' }} />
                     <Stack.Screen name="translations/[translationId]" />
                     <Stack.Screen name="downloads" options={{ presentation: 'modal' }} />

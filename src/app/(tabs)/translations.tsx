@@ -58,7 +58,10 @@ export default function TranslationsScreen() {
       subtitle="Each translation is kept exactly as imported. Re-importing the same ID replaces its text while preserving your annotations."
       title="Translations"
     >
-      <FolioButton label="Import translation" onPress={() => router.push('/translations/import')} style={styles.importButton} />
+      <View style={styles.libraryActions}>
+        <FolioButton label="Download translations" onPress={() => router.push('/translations/download')} style={styles.libraryAction} />
+        <FolioButton label="Import JSON file" onPress={() => router.push('/translations/import')} style={styles.libraryAction} variant="secondary" />
+      </View>
       {translations.isLoading ? <LoadingFolio label="Reading your library…" /> : null}
       {!translations.isLoading && !translations.data?.length ? (
         <EmptyFolio
@@ -196,5 +199,6 @@ const styles = StyleSheet.create({
   deleteActionLabel: { color: colors.oxblood, fontFamily: fontFamilies.bodyBold, fontSize: 15 },
   actionPressed: { opacity: 0.6 },
   actionDisabled: { opacity: 0.45 },
-  importButton: { marginBottom: 18 },
+  libraryActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 18 },
+  libraryAction: { flex: 1, minWidth: 190 },
 });

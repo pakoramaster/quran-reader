@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -139,6 +139,12 @@ export default function SurahReaderScreen() {
       await Promise.all([queryClient.invalidateQueries({ queryKey: ['annotations', surahNumber] }), queryClient.invalidateQueries({ queryKey: ['annotated-ayahs'] })]);
     },
   });
+  const mutateAnnotation = saveMutation.mutate;
+  const closeEditor = useCallback(() => setEditorAyah(null), []);
+  const saveEditor = useCallback(
+    (note: string | null, highlight: HighlightColor | null) => mutateAnnotation({ note, highlight }),
+    [mutateAnnotation],
+  );
 
   if (!Number.isInteger(surahNumber) || surahNumber < 1 || surahNumber > 114) {
     return <EmptyFolio body="This Surah number is outside the canonical Quran." glyph="؟" title="Surah not found" />;
@@ -347,8 +353,8 @@ export default function SurahReaderScreen() {
       <AnnotationEditor
         ayah={editorAyah}
         key={editorAyah?.verseKey ?? 'closed'}
-        onClose={() => setEditorAyah(null)}
-        onSave={(note, highlight) => saveMutation.mutate({ note, highlight })}
+        onClose={closeEditor}
+        onSave={saveEditor}
         saving={saveMutation.isPending}
         visible={Boolean(editorAyah)}
       />

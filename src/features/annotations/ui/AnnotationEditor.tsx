@@ -1,5 +1,5 @@
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FolioButton } from '@/components/FolioButton';
@@ -18,7 +18,7 @@ interface AnnotationEditorProps {
   onSave: (note: string | null, highlight: HighlightColor | null) => void;
 }
 
-export function AnnotationEditor({ ayah, visible, saving, onClose, onSave }: AnnotationEditorProps) {
+export const AnnotationEditor = memo(function AnnotationEditor({ ayah, visible, saving, onClose, onSave }: AnnotationEditorProps) {
   const [note, setNote] = useState(() => ayah?.annotation?.noteText ?? '');
   const [highlight, setHighlight] = useState<HighlightColor | null>(() => ayah?.annotation?.highlightColor ?? null);
 
@@ -89,7 +89,7 @@ export function AnnotationEditor({ ayah, visible, saving, onClose, onSave }: Ann
       </SafeAreaView>
     </FolioModal>
   );
-}
+});
 
 const styles = StyleSheet.create({
   safeArea: { backgroundColor: colors.paper, flex: 1 },

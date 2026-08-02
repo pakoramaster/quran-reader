@@ -32,6 +32,11 @@ export interface ReciterDownloadResult {
   totalSurahs: number;
 }
 
+export interface ReciterDownloadOptions {
+  onSurahDownloaded?: (download: RecitationDownload) => void;
+  signal?: AbortSignal;
+}
+
 interface DownloadRow {
   reciter_id: ReciterId;
   surah_number: number;
@@ -57,23 +62,33 @@ export async function downloadSurahRecitation(
   surahNumber: number,
   verseKeys: VerseKey[],
   onProgress?: (completed: number, total: number) => void,
+  signal?: AbortSignal,
 ): Promise<RecitationDownload> {
+  signal?.throwIfAborted();
   let cursor = 0;
   let completed = 0;
   let byteCount = 0;
   const workers = Array.from({ length: Math.min(4, verseKeys.length) }, async () => {
-    while (cursor < verseKeys.length) {
+    while (cursor < verseKeys.length && !signal?.aborted) {
       const index = cursor;
       cursor += 1;
       const verseKey = verseKeys[index];
       if (!verseKey) return;
-      const downloadedBytes = await downloadRecitationFile(reciterId, verseKey);
+      const downloadedBytes = signal
+        ? await downloadRecitationFile(reciterId, verseKey, signal)
+        : await downloadRecitationFile(reciterId, verseKey);
       byteCount += downloadedBytes;
       completed += 1;
       onProgress?.(completed, verseKeys.length);
     }
   });
-  await Promise.all(workers);
+  const results = await Promise.allSettled(workers);
+  if (signal?.aborted) {
+    await deleteDownloadedSurahFiles(reciterId, surahNumber);
+    signal.throwIfAborted();
+  }
+  const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (failed) throw failed.reason;
   const downloadedAt = Date.now();
   await db.runAsync(
     `INSERT INTO recitation_downloads (reciter_id, surah_number, verse_count, byte_count, downloaded_at)
@@ -96,15 +111,18 @@ export async function downloadReciterRecitations(
   reciterId: ReciterId,
   surahs: RecitationSurahDownloadPlan[],
   onProgress?: (progress: ReciterDownloadProgress) => void,
+  options?: ReciterDownloadOptions,
 ): Promise<ReciterDownloadResult> {
+  options?.signal?.throwIfAborted();
   const existing = new Set((await listRecitationDownloads(db)).filter((item) => item.reciterId === reciterId).map((item) => item.surahNumber));
   const pending = surahs.filter((surah) => !existing.has(surah.number));
   const skippedSurahs = surahs.length - pending.length;
   let downloadedSurahs = 0;
 
   for (const surah of pending) {
+    options?.signal?.throwIfAborted();
     const verseKeys = Array.from({ length: surah.ayahCount }, (_, index) => `${surah.number}:${index + 1}` as VerseKey);
-    await downloadSurahRecitation(db, reciterId, surah.number, verseKeys, (currentAyah, currentSurahTotalAyahs) => {
+    const download = await downloadSurahRecitation(db, reciterId, surah.number, verseKeys, (currentAyah, currentSurahTotalAyahs) => {
       onProgress?.({
         completedSurahs: skippedSurahs + downloadedSurahs,
         currentAyah,
@@ -113,8 +131,9 @@ export async function downloadReciterRecitations(
         skippedSurahs,
         totalSurahs: surahs.length,
       });
-    });
+    }, options?.signal);
     downloadedSurahs += 1;
+    options?.onSurahDownloaded?.(download);
   }
 
   return { downloadedSurahs, skippedSurahs, totalSurahs: surahs.length };
