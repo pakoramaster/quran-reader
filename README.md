@@ -6,8 +6,9 @@ React Native, TypeScript, Expo Router, SQLite, and Electron.
 ## What works
 
 - Verified Tanzil Uthmani 1.1 Arabic text bundled in a query-only SQLite database.
-- Complete JSON translation import with strict validation, checksum, preview,
-  and atomic same-ID replacement.
+- Direct translation downloads from [faisalill/quran_db](https://github.com/faisalill/quran_db),
+  plus local JSON import with strict validation, checksum, preview, and atomic
+  same-ID replacement.
 - Multiple installed translations with one active reading translation.
 - Per-Ayah private notes and whole-Ayah highlights, searchable from a Notes tab.
 - Single-Ayah and continuous-Surah device text-to-speech.
