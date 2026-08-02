@@ -1,4 +1,4 @@
-import type { CSSProperties, FormEvent } from 'react';
+import type { CSSProperties, FormEvent, PointerEvent } from 'react';
 import { useEffect, useRef } from 'react';
 import { StyleSheet } from 'react-native';
 
@@ -31,11 +31,19 @@ export function FolioTextInput({
   const handleInput = (event: FormEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     onChangeText(event.currentTarget.value);
   };
+  const handlePointerDown = (event: PointerEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    // React Native Web's responder can retain the pointer after a modal closes or
+    // its route unmounts. Keep it from claiming subsequent textarea presses and
+    // explicitly restore DOM focus for Windows/Electron.
+    event.stopPropagation();
+    event.currentTarget.focus({ preventScroll: true });
+  };
   const commonProps = {
     'aria-label': accessibilityLabel,
     className: 'folio-platform-text-input',
     maxLength,
     onInput: handleInput,
+    onPointerDown: handlePointerDown,
     placeholder,
     ref: elementRef,
     style: {
