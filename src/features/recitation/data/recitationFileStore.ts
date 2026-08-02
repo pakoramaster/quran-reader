@@ -12,7 +12,8 @@ function verseFile(reciterId: ReciterId, verseKey: VerseKey) {
   return new File(surahDirectory(reciterId, surahNumber ?? 0), `${verseKey.replace(':', '-')}.mp3`);
 }
 
-export async function downloadRecitationFile(reciterId: ReciterId, verseKey: VerseKey): Promise<number> {
+export async function downloadRecitationFile(reciterId: ReciterId, verseKey: VerseKey, signal?: AbortSignal): Promise<number> {
+  signal?.throwIfAborted();
   const directory = surahDirectory(reciterId, Number(verseKey.split(':')[0]));
   directory.create({ intermediates: true, idempotent: true });
   const output = await File.downloadFileAsync(
@@ -20,6 +21,7 @@ export async function downloadRecitationFile(reciterId: ReciterId, verseKey: Ver
     verseFile(reciterId, verseKey),
     { idempotent: true },
   );
+  signal?.throwIfAborted();
   return output.size;
 }
 

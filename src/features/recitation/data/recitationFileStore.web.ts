@@ -8,9 +8,9 @@ async function cache() {
   return globalThis.caches.open(CACHE_NAME);
 }
 
-export async function downloadRecitationFile(reciterId: ReciterId, verseKey: VerseKey): Promise<number> {
+export async function downloadRecitationFile(reciterId: ReciterId, verseKey: VerseKey, signal?: AbortSignal): Promise<number> {
   const url = getRecitationUrl(reciterId, verseKey);
-  const response = await fetch(url);
+  const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`Audio download failed (${response.status}).`);
   const bytes = await response.clone().arrayBuffer();
   await (await cache()).put(url, response);
