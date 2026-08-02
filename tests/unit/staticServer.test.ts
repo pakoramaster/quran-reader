@@ -100,7 +100,7 @@ describe('desktop static server', () => {
     expect(speech.status).toBe(200);
     expect(speech.headers['content-type']).toBe('audio/wav');
     expect(speech.body).toBe('RIFFmock');
-    expect(synthesize).toHaveBeenLastCalledWith({ speakerId: 9, speed: 0.9, text: 'A standard voice.' });
+    expect(synthesize).toHaveBeenLastCalledWith({ priority: 'foreground', speakerId: 9, speed: 0.9, text: 'A standard voice.' });
   });
 
   it('accepts every configured Windows voice and rejects unknown speakers', async () => {

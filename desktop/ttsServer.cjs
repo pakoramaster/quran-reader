@@ -304,9 +304,30 @@ function createTtsService(_dataRoot, bundledModelsRoot = path.resolve(__dirname,
   const modelRoot = path.join(bundledModelsRoot, modelId);
   let enginePromise;
   let engineInstance = null;
-  let generationTail = Promise.resolve();
+  const generationQueue = [];
+  let generationRunning = false;
   const audioCache = new Map();
   const synthesisPromises = new Map();
+
+  function runNextGeneration() {
+    if (generationRunning) return;
+    const foregroundIndex = generationQueue.findIndex((task) => task.priority === 'foreground');
+    const index = foregroundIndex >= 0 ? foregroundIndex : 0;
+    const scheduled = generationQueue.splice(index, 1)[0];
+    if (!scheduled) return;
+    generationRunning = true;
+    void scheduled.generate().then(scheduled.resolve, scheduled.reject).finally(() => {
+      generationRunning = false;
+      runNextGeneration();
+    });
+  }
+
+  function scheduleGeneration(cacheKey, generate, priority) {
+    return new Promise((resolve, reject) => {
+      generationQueue.push({ cacheKey, generate, priority, reject, resolve });
+      runNextGeneration();
+    });
+  }
 
   async function ensureModel() {
     if (isReady(modelRoot)) return modelRoot;
@@ -359,6 +380,7 @@ function createTtsService(_dataRoot, bundledModelsRoot = path.resolve(__dirname,
       text,
       speakerId,
       speed,
+      priority = 'foreground',
     }) {
       const cacheKey = JSON.stringify([text, speakerId, speed]);
       const cached = audioCache.get(cacheKey);
@@ -368,7 +390,13 @@ function createTtsService(_dataRoot, bundledModelsRoot = path.resolve(__dirname,
         return cached;
       }
       const existing = synthesisPromises.get(cacheKey);
-      if (existing) return existing;
+      if (existing) {
+        if (priority === 'foreground') {
+          const queued = generationQueue.find((task) => task.cacheKey === cacheKey);
+          if (queued) queued.priority = 'foreground';
+        }
+        return existing;
+      }
 
       const generate = async () => {
         const tts = await engine();
@@ -484,8 +512,7 @@ function createTtsService(_dataRoot, bundledModelsRoot = path.resolve(__dirname,
         );
       };
 
-      const generation = generationTail.then(generate, generate);
-      generationTail = generation.then(() => undefined, () => undefined);
+      const generation = scheduleGeneration(cacheKey, generate, priority);
       const pending = generation.then((wav) => {
         audioCache.set(cacheKey, wav);
         while (audioCache.size > 32) audioCache.delete(audioCache.keys().next().value);

@@ -1,6 +1,6 @@
 {
   "name": "quran-folio",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "An offline-first Quran reader for mobile and Windows.",
   "author": "Quran Folio contributors",
   "private": true,
@@ -98,6 +98,7 @@
     "expo-localization": "~57.0.1",
     "expo-router": "~57.0.6",
     "expo-sharing": "~57.0.1",
+    "expo-speech": "~57.0.1",
     "expo-sqlite": "~57.0.1",
     "expo-status-bar": "~57.0.1",
     "fflate": "^0.8.2",

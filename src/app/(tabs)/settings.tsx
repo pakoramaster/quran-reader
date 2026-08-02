@@ -13,9 +13,12 @@ import { getQuranMetadata } from '@/features/quran-reader/data/quranRepository';
 import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
 import { DEFAULT_READING_FONT_SIZE_ID, isReadingFontSizeId, READING_FONT_SIZES } from '@/features/settings/domain/readingFontSizes';
 import { useSpeech } from '@/features/speech/application/SpeechProvider';
+import { listSystemVoices } from '@/features/speech/data/systemTtsEngine';
 import { ensureUniformVoiceModel } from '@/features/speech/data/uniformTtsEngine';
-import { DEFAULT_VOICE_PROFILE_ID, isVoiceProfileId, VOICE_PROFILES } from '@/features/speech/domain/voiceProfiles';
-import { DEFAULT_TTS_SPEED_ID, getTtsSpeed, isTtsSpeedId, TTS_SPEEDS } from '@/features/speech/domain/ttsSpeeds';
+import { DEFAULT_SPEECH_ENGINE_ID, isSpeechEngineId, SPEECH_ENGINES, type SpeechEngineId } from '@/features/speech/domain/speechEngines';
+import { DEFAULT_SYSTEM_VOICE_ID, getSystemSpeechRate } from '@/features/speech/domain/systemVoices';
+import { DEFAULT_VOICE_PROFILE_ID, isVoiceProfileId, VOICE_PROFILES, type VoiceProfileId } from '@/features/speech/domain/voiceProfiles';
+import { DEFAULT_TTS_SPEED_ID, getTtsSpeed, isTtsSpeedId, TTS_SPEEDS, type TtsSpeedId } from '@/features/speech/domain/ttsSpeeds';
 import { getActiveTranslationId, getTranslation } from '@/features/translations/data/translationRepository';
 import { pickBackupFile, saveBackupFile } from '@/platform/backups/backupFiles';
 import { requestConfirmation, showMessage } from '@/platform/dialogs/dialogs';
@@ -27,6 +30,13 @@ export default function SettingsScreen() {
   const queryClient = useQueryClient();
   const speech = useSpeech();
   const [testingVoice, setTestingVoice] = useState(false);
+  const [speechDraft, setSpeechDraft] = useState<{
+    language: string;
+    engineId: SpeechEngineId;
+    profileId: VoiceProfileId;
+    speedId: TtsSpeedId;
+    systemVoiceId: string;
+  } | null>(null);
   const metadata = useQuery({
     queryKey: ['quran-metadata'],
     queryFn: () => getQuranMetadata(quranDb),
@@ -44,6 +54,8 @@ export default function SettingsScreen() {
     queryFn: async () => ({
       profile: await getSetting(userDb, 'tts_voice_profile'),
       speed: await getSetting(userDb, 'tts_speed'),
+      engine: await getSetting(userDb, 'tts_engine'),
+      systemVoice: await getSetting(userDb, 'tts_system_voice'),
     }),
     enabled: Boolean(activeTranslation.data?.language),
   });
@@ -66,6 +78,32 @@ export default function SettingsScreen() {
           queryKey: ['recitation-player-settings'],
         }),
       ]);
+    },
+  });
+  const systemVoices = useQuery({
+    queryKey: ['system-voices', activeTranslation.data?.language],
+    queryFn: () => listSystemVoices(activeTranslation.data!.language),
+    enabled: Boolean(activeTranslation.data?.language),
+    staleTime: Infinity,
+  });
+  const saveSpeechSettings = useMutation({
+    mutationFn: async ({ engineId, profileId, speedId, systemVoiceId }: { engineId: SpeechEngineId; profileId: VoiceProfileId; speedId: TtsSpeedId; systemVoiceId: string }) => {
+      await speech.stop();
+      await setSetting(userDb, 'tts_engine', engineId);
+      await setSetting(userDb, 'tts_system_voice', systemVoiceId);
+      await setSetting(userDb, 'tts_voice_profile', profileId);
+      await setSetting(userDb, 'tts_speed', speedId);
+    },
+    onError: (error) => showMessage(
+      'Speaker settings could not be saved',
+      error instanceof Error ? error.message : 'The selected speaker settings could not be saved.',
+    ),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['speech-settings'] }),
+        queryClient.invalidateQueries({ queryKey: ['recitation-player-settings'] }),
+      ]);
+      showMessage('Speaker settings saved', 'Your selected voice and translation speech speed are now used for read aloud.');
     },
   });
   const backup = useMutation({
@@ -111,15 +149,53 @@ export default function SettingsScreen() {
     }
   };
 
-  const selectedProfileId = isVoiceProfileId(speechSettings.data?.profile) ? speechSettings.data.profile : DEFAULT_VOICE_PROFILE_ID;
-  const selectedSpeedId = isTtsSpeedId(speechSettings.data?.speed) ? speechSettings.data.speed : DEFAULT_TTS_SPEED_ID;
+  const storedProfileId = isVoiceProfileId(speechSettings.data?.profile) ? speechSettings.data.profile : DEFAULT_VOICE_PROFILE_ID;
+  const storedSpeedId = isTtsSpeedId(speechSettings.data?.speed) ? speechSettings.data.speed : DEFAULT_TTS_SPEED_ID;
+  const storedEngineId = isSpeechEngineId(speechSettings.data?.engine) ? speechSettings.data.engine : DEFAULT_SPEECH_ENGINE_ID;
+  const storedSystemVoiceId = speechSettings.data?.systemVoice || DEFAULT_SYSTEM_VOICE_ID;
+  const currentLanguage = activeTranslation.data?.language ?? '';
+  const currentDraft = speechDraft?.language === currentLanguage ? speechDraft : null;
+  const selectedProfileId = currentDraft?.profileId ?? storedProfileId;
+  const selectedSpeedId = currentDraft?.speedId ?? storedSpeedId;
+  const selectedEngineId = currentDraft?.engineId ?? storedEngineId;
+  const availableSystemVoiceIds = new Set(systemVoices.data?.map((voice) => voice.identifier));
+  const validStoredSystemVoiceId = systemVoices.data && storedSystemVoiceId !== DEFAULT_SYSTEM_VOICE_ID && !availableSystemVoiceIds.has(storedSystemVoiceId) ? DEFAULT_SYSTEM_VOICE_ID : storedSystemVoiceId;
+  const selectedSystemVoiceId = currentDraft?.systemVoiceId ?? validStoredSystemVoiceId;
   const selectedSpeed = getTtsSpeed(selectedSpeedId);
+  const speechSettingsChanged = selectedEngineId !== storedEngineId || selectedProfileId !== storedProfileId || selectedSpeedId !== storedSpeedId || selectedSystemVoiceId !== storedSystemVoiceId;
   const selectedReadingFontSize = isReadingFontSizeId(readingFontSize.data) ? readingFontSize.data : DEFAULT_READING_FONT_SIZE_ID;
+  const stopForSpeechSettingsChange = () => {
+    if (speech.status !== 'idle') void speech.stop();
+  };
+  const selectVoiceProfile = (profileId: VoiceProfileId) => {
+    stopForSpeechSettingsChange();
+    setSpeechDraft({ engineId: selectedEngineId, language: currentLanguage, profileId, speedId: selectedSpeedId, systemVoiceId: selectedSystemVoiceId });
+  };
+  const selectSpeechSpeed = (speedId: TtsSpeedId) => {
+    stopForSpeechSettingsChange();
+    setSpeechDraft({ engineId: selectedEngineId, language: currentLanguage, profileId: selectedProfileId, speedId, systemVoiceId: selectedSystemVoiceId });
+  };
+  const selectSpeechEngine = (engineId: SpeechEngineId) => {
+    stopForSpeechSettingsChange();
+    setSpeechDraft({ engineId, language: currentLanguage, profileId: selectedProfileId, speedId: selectedSpeedId, systemVoiceId: selectedSystemVoiceId });
+  };
+  const selectSystemVoice = (systemVoiceId: string) => {
+    stopForSpeechSettingsChange();
+    setSpeechDraft({ engineId: selectedEngineId, language: currentLanguage, profileId: selectedProfileId, speedId: selectedSpeedId, systemVoiceId });
+  };
   const testCurrentVoice = async () => {
     setTestingVoice(true);
     try {
-      await ensureUniformVoiceModel();
-      speech.speakAyah({ key: '1:1', text: 'This translation is ready for offline reading.' }, activeTranslation.data?.language ?? 'en', selectedProfileId, selectedSpeed.value, 1);
+      if (selectedEngineId === 'kokoro') await ensureUniformVoiceModel();
+      speech.speakAyah(
+        { key: '1:1', text: 'This translation is ready for offline reading.' },
+        activeTranslation.data?.language ?? 'en',
+        selectedEngineId,
+        selectedSystemVoiceId,
+        selectedProfileId,
+        selectedSpeed.value,
+        1,
+      );
     } catch (error) {
       showMessage('Voice could not be prepared', error instanceof Error ? error.message : 'The standard voice pack is unavailable.');
     } finally {
@@ -128,7 +204,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <FolioScreen eyebrow="Reading room preferences" subtitle="Four shared offline voices keep translation playback consistent across Android, iPhone, and Windows." title="Settings">
+    <FolioScreen eyebrow="Reading room preferences" subtitle="Choose consistent Kokoro voices or a faster voice installed on this device." title="Settings">
       <Section icon="text-outline" title="Reading text size">
         <Text style={styles.copy}>Adjust the Arabic verses, translations, recitation playlist, and note excerpts.</Text>
         {READING_FONT_SIZES.map((option) => {
@@ -155,20 +231,86 @@ export default function SettingsScreen() {
         {activeTranslation.data ? (
           <>
             <Text style={styles.copy}>
-              Voice for {activeTranslation.data.title} ({activeTranslation.data.language}). The included voice pack runs privately on this device.
+              Voice for {activeTranslation.data.title} ({activeTranslation.data.language}). Both options run privately on this device.
             </Text>
-            {VOICE_PROFILES.map((profile) => {
-              const selected = selectedProfileId === profile.id;
+            <Text style={styles.preferenceLabel}>Speech engine</Text>
+            {SPEECH_ENGINES.map((engine) => {
+              const selected = selectedEngineId === engine.id;
               return (
-                <Pressable key={profile.id} onPress={() => save.mutate({ key: 'tts_voice_profile', value: profile.id })} style={[styles.optionRow, selected ? styles.optionSelected : null]}>
+                <Pressable
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selected }}
+                  key={engine.id}
+                  onPress={() => selectSpeechEngine(engine.id)}
+                  style={[styles.optionRow, selected ? styles.optionSelected : null]}
+                >
                   <View style={styles.optionCopy}>
-                    <Text style={styles.optionTitle}>{profile.name}</Text>
-                    <Text style={styles.optionMeta}>{profile.description}</Text>
+                    <Text style={styles.optionTitle}>{engine.name}</Text>
+                    <Text style={styles.optionMeta}>{engine.description}</Text>
                   </View>
                   {selected ? <Ionicons color={colors.emerald} name="checkmark-circle" size={21} /> : null}
                 </Pressable>
               );
             })}
+            {selectedEngineId === 'kokoro' ? (
+              <>
+                <Text style={styles.preferenceLabel}>Kokoro voice</Text>
+                {VOICE_PROFILES.map((profile) => {
+                  const selected = selectedProfileId === profile.id;
+                  return (
+                    <Pressable
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: selected }}
+                      key={profile.id}
+                      onPress={() => selectVoiceProfile(profile.id)}
+                      style={[styles.optionRow, selected ? styles.optionSelected : null]}
+                    >
+                      <View style={styles.optionCopy}>
+                        <Text style={styles.optionTitle}>{profile.name}</Text>
+                        <Text style={styles.optionMeta}>{profile.description}</Text>
+                      </View>
+                      {selected ? <Ionicons color={colors.emerald} name="checkmark-circle" size={21} /> : null}
+                    </Pressable>
+                  );
+                })}
+              </>
+            ) : (
+              <>
+                <Text style={styles.preferenceLabel}>Device voice</Text>
+                <Pressable
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selectedSystemVoiceId === DEFAULT_SYSTEM_VOICE_ID }}
+                  onPress={() => selectSystemVoice(DEFAULT_SYSTEM_VOICE_ID)}
+                  style={[styles.optionRow, selectedSystemVoiceId === DEFAULT_SYSTEM_VOICE_ID ? styles.optionSelected : null]}
+                >
+                  <View style={styles.optionCopy}>
+                    <Text style={styles.optionTitle}>System default</Text>
+                    <Text style={styles.optionMeta}>Let the operating system choose a voice for {activeTranslation.data.language}.</Text>
+                  </View>
+                  {selectedSystemVoiceId === DEFAULT_SYSTEM_VOICE_ID ? <Ionicons color={colors.emerald} name="checkmark-circle" size={21} /> : null}
+                </Pressable>
+                {systemVoices.data?.map((voice) => {
+                  const selected = selectedSystemVoiceId === voice.identifier;
+                  return (
+                    <Pressable
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: selected }}
+                      key={voice.identifier}
+                      onPress={() => selectSystemVoice(voice.identifier)}
+                      style={[styles.optionRow, selected ? styles.optionSelected : null]}
+                    >
+                      <View style={styles.optionCopy}>
+                        <Text style={styles.optionTitle}>{voice.name}</Text>
+                        <Text style={styles.optionMeta}>{voice.language}{voice.quality === 'Enhanced' ? ' · Enhanced' : ''}</Text>
+                      </View>
+                      {selected ? <Ionicons color={colors.emerald} name="checkmark-circle" size={21} /> : null}
+                    </Pressable>
+                  );
+                })}
+                {systemVoices.isLoading ? <Text style={styles.optionMeta}>Finding installed voices…</Text> : null}
+                {systemVoices.isError ? <Text style={styles.optionMeta}>Installed voices could not be listed. The system default remains available.</Text> : null}
+              </>
+            )}
             <Text style={styles.preferenceLabel}>Translation speech speed</Text>
             {TTS_SPEEDS.map((speed) => {
               const selected = selectedSpeedId === speed.id;
@@ -177,22 +319,29 @@ export default function SettingsScreen() {
                   accessibilityRole="radio"
                   accessibilityState={{ checked: selected }}
                   key={speed.id}
-                  onPress={() => save.mutate({ key: 'tts_speed', value: speed.id })}
+                  onPress={() => selectSpeechSpeed(speed.id)}
                   style={[styles.optionRow, selected ? styles.optionSelected : null]}
                 >
                   <View style={styles.optionCopy}>
                     <Text style={styles.optionTitle}>{speed.label}</Text>
-                    <Text style={styles.optionMeta}>{speed.description}</Text>
+                    <Text style={styles.optionMeta}>{selectedEngineId === 'system' ? `${getSystemSpeechRate(speed.value)}× device speed` : speed.description}</Text>
                   </View>
                   {selected ? <Ionicons color={colors.emerald} name="checkmark-circle" size={21} /> : null}
                 </Pressable>
               );
             })}
-            <Text style={styles.ready}>Standard voice pack included for offline use</Text>
+            <Text style={styles.ready}>{selectedEngineId === 'kokoro' ? 'Kokoro voice pack included for offline use' : 'Using an installed operating-system voice'}</Text>
             <FolioButton label="Test current voice" loading={testingVoice} onPress={() => void testCurrentVoice()} style={styles.testButton} variant="secondary" />
+            <FolioButton
+              disabled={!speechSettings.data || !speechSettingsChanged}
+              label="Save speaker settings"
+              loading={saveSpeechSettings.isPending}
+              onPress={() => saveSpeechSettings.mutate({ engineId: selectedEngineId, profileId: selectedProfileId, speedId: selectedSpeedId, systemVoiceId: selectedSystemVoiceId })}
+              style={styles.saveSpeakerButton}
+            />
             <Text style={styles.footnote}>
-              These are fixed speakers from the same quantized KokoroTTS model on every supported platform, rather than voices supplied by the operating system. This voice pack currently reads English
-              translations.
+              Kokoro provides the same four English voices on every platform. Device voice uses the selected language with an installed Android, Apple, or Windows speech engine; its sound and offline
+              availability depend on the voices installed on that device.
             </Text>
           </>
         ) : (
@@ -338,6 +487,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   testButton: { marginTop: 16 },
+  saveSpeakerButton: { marginTop: 10 },
   restoreButton: { marginTop: 10 },
   footnote: {
     color: colors.inkMuted,
