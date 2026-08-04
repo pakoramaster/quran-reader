@@ -1,6 +1,6 @@
 {
   "name": "quran-folio",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "An offline-first Quran reader for mobile and Windows.",
   "author": "Quran Folio contributors",
   "private": true,

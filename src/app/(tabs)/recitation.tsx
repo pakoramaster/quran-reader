@@ -30,6 +30,7 @@ const keys = {
   rangeRepeat: 'recitation_range_repeat',
   ayahRepeat: 'recitation_ayah_repeat',
   volume: 'recitation_volume',
+  speed: 'recitation_speed',
 } as const;
 
 const verseViewabilityConfig = { itemVisiblePercentThreshold: 20 };
@@ -68,6 +69,7 @@ export default function RecitationScreen() {
   const [rangeRepeatOverride, setRangeRepeatOverride] = useState<number>();
   const [ayahRepeatOverride, setAyahRepeatOverride] = useState<number>();
   const [volumeOverride, setVolumeOverride] = useState<number>();
+  const [speedOverride, setSpeedOverride] = useState<number>();
   const [sheetProgress] = useState(() => new Animated.Value(0));
   const openSettings = useCallback(() => {
     sheetProgress.setValue(0);
@@ -113,6 +115,7 @@ export default function RecitationScreen() {
       rangeRepeat: await getSetting(userDb, keys.rangeRepeat),
       ayahRepeat: await getSetting(userDb, keys.ayahRepeat),
       volume: await getSetting(userDb, keys.volume),
+      speed: await getSetting(userDb, keys.speed),
       voiceProfile: await getSetting(userDb, 'tts_voice_profile'),
       voiceSpeed: await getSetting(userDb, 'tts_speed'),
       speechEngine: await getSetting(userDb, 'tts_engine'),
@@ -136,6 +139,7 @@ export default function RecitationScreen() {
   const rangeRepeat = rangeRepeatOverride ?? bounded(stored.data?.rangeRepeat ?? null, 1, 1, 20);
   const ayahRepeat = ayahRepeatOverride ?? bounded(stored.data?.ayahRepeat ?? null, 1, 1, 20);
   const volume = volumeOverride ?? bounded(stored.data?.volume ?? null, 0.8, 0, 1);
+  const speed = speedOverride ?? bounded(stored.data?.speed ?? null, 1, 1, 2);
   const voiceProfileId = isVoiceProfileId(stored.data?.voiceProfile) ? stored.data.voiceProfile : DEFAULT_VOICE_PROFILE_ID;
   const voiceSpeed = getTtsSpeed(isTtsSpeedId(stored.data?.voiceSpeed) ? stored.data.voiceSpeed : null);
   const speechEngineId = isSpeechEngineId(stored.data?.speechEngine) ? stored.data.speechEngine : DEFAULT_SPEECH_ENGINE_ID;
@@ -254,6 +258,7 @@ export default function RecitationScreen() {
       voiceSpeed.value,
       1,
       volume,
+      speed,
       { range: rangeRepeat, ayah: ayahRepeat, startAt },
     );
   };
@@ -491,6 +496,24 @@ export default function RecitationScreen() {
                   <Stepper label="Playback volume" max={100} min={0} onChange={(next) => changeVolume(next / 100)} suffix="%" step={10} value={Math.round(volume * 100)} />
                 </SettingSection>
 
+                <SettingSection title="Recitation speed">
+                  <Stepper
+                    displayValue={`${speed.toFixed(1)}×`}
+                    label="Qur’an recitation speed"
+                    max={20}
+                    min={10}
+                    onChange={(next) => {
+                      const nextSpeed = next / 10;
+                      stopForChange();
+                      setSpeedOverride(nextSpeed);
+                      persistNumber(keys.speed, nextSpeed);
+                    }}
+                    step={1}
+                    value={Math.round(speed * 10)}
+                  />
+                  <Text style={styles.help}>Changes the reciter audio speed while preserving the voice pitch. Translation speech speed is configured separately.</Text>
+                </SettingSection>
+
                 <SettingSection title="Surah range">
                   <RangeChoice label="From" name={startName} number={startSurah} onPress={() => setRangePicker('start')} />
                   <RangeChoice label="To" name={endName} number={endSurah} onPress={() => setRangePicker('end')} />
@@ -574,6 +597,7 @@ function Stepper({
   max,
   step = 1,
   suffix = '',
+  displayValue,
   onChange,
 }: {
   label: string;
@@ -582,6 +606,7 @@ function Stepper({
   max: number;
   step?: number;
   suffix?: string;
+  displayValue?: string;
   onChange: (value: number) => void;
 }) {
   return (
@@ -589,8 +614,7 @@ function Stepper({
       <View style={styles.stepperCopy}>
         <Text style={styles.stepperLabel}>{label}</Text>
         <Text style={styles.stepperValue}>
-          {value}
-          {suffix}
+          {displayValue ?? `${value}${suffix}`}
         </Text>
       </View>
       <View style={styles.stepperButtons}>
