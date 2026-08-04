@@ -181,6 +181,15 @@ export default function RecitationScreen() {
     return () => controller.abort();
   }, [playbackRows, selectedIndex, speechEngineId, translation, voiceProfileId, voiceSpeed.value]);
   const currentIndex = playbackRows.findIndex((verse) => verse.key === speech.currentVerseKey);
+  const toggleFollowingPlayback = () => {
+    setFollowingPlayback((current) => {
+      const next = !current;
+      if (next && currentIndex >= 0) {
+        requestAnimationFrame(() => verseListRef.current?.scrollToIndex({ animated: true, index: currentIndex, viewPosition: 0.42 }));
+      }
+      return next;
+    });
+  };
   const currentSurahNumber = currentIndex >= 0 ? (playbackRows[currentIndex]?.surahNumber ?? null) : null;
   const visibleSurahDistance =
     currentSurahNumber === null || visibleSurahs === null
@@ -267,7 +276,6 @@ export default function RecitationScreen() {
     const verse = playbackRows[index];
     if (!verse) return;
     setSelectedVerseKey(verse.key);
-    setFollowingPlayback(true);
     verseListRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.42 });
     if (speech.status !== 'idle') beginPlayback(index);
   };
@@ -305,6 +313,17 @@ export default function RecitationScreen() {
     </View>
   );
   const volumeControl = <CompactVolumeControl onChange={changeVolume} value={volume} />;
+  const followControl = (
+    <Pressable
+      accessibilityLabel={followingPlayback ? 'Disable follow along' : 'Enable follow along'}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: followingPlayback }}
+      onPress={toggleFollowingPlayback}
+      style={[styles.compactControl, followingPlayback ? styles.compactControlSelected : null]}
+    >
+      <Ionicons color={followingPlayback ? colors.paperLight : colors.emerald} name={followingPlayback ? 'locate' : 'locate-outline'} size={20} />
+    </Pressable>
+  );
   const settingsControl = (
     <Pressable accessibilityLabel="Open settings" onPress={openSettings} style={styles.compactControl}>
       <Ionicons color={colors.emerald} name="options-outline" size={20} />
@@ -350,7 +369,6 @@ export default function RecitationScreen() {
               </>
             }
             ListEmptyComponent={versesLoading ? <ActivityIndicator color={colors.gold} size="large" style={styles.listLoader} /> : null}
-            onScrollBeginDrag={() => setFollowingPlayback(false)}
             onScrollToIndexFailed={({ index }) => setTimeout(() => verseListRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.42 }), 250)}
             onViewableItemsChanged={handleViewableItemsChanged}
             ref={verseListRef}
@@ -396,6 +414,7 @@ export default function RecitationScreen() {
                 </>
               );
             }}
+            scrollEnabled={!followingPlayback || speech.status === 'idle'}
             showsVerticalScrollIndicator={false}
             viewabilityConfig={verseViewabilityConfig}
           />
@@ -406,6 +425,7 @@ export default function RecitationScreen() {
                 {playControl}
                 {statusControl}
                 {volumeControl}
+                {followControl}
                 {settingsControl}
               </>
             ) : (
@@ -415,6 +435,7 @@ export default function RecitationScreen() {
                   {stopControl}
                   {playControl}
                   {volumeControl}
+                  {followControl}
                   {settingsControl}
                 </View>
               </>
@@ -703,6 +724,7 @@ const styles = StyleSheet.create({
     width: Platform.OS === 'web' ? 'auto' : '94%',
   },
   compactControl: { alignItems: 'center', borderRadius: 18, height: 38, justifyContent: 'center', width: 34 },
+  compactControlSelected: { backgroundColor: colors.emerald },
   compactPlayControl: { alignItems: 'center', backgroundColor: colors.emerald, borderRadius: 22, height: 44, justifyContent: 'center', width: 44 },
   controllerStatus: { flexShrink: 1, minWidth: 110, paddingHorizontal: 4 },
   controllerStatusMobile: { alignItems: 'flex-start', minWidth: 0, paddingHorizontal: 12, width: '100%' },
