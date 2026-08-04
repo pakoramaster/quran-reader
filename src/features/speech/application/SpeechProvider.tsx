@@ -45,6 +45,7 @@ interface SpeechContextValue extends SpeechState {
     rate?: number,
     pitch?: number,
     volume?: number,
+    recitationRate?: number,
     repeats?: PlaybackRepeats,
   ) => void;
   pause: () => Promise<void>;
@@ -71,6 +72,7 @@ interface QueueConfig {
   rate: number;
   pitch: number;
   volume: number;
+  recitationRate: number;
   repeats: PlaybackRepeats;
 }
 
@@ -230,6 +232,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
           if (__DEV__) console.info('[Quran Folio TTS]', { text: verse.text.slice(0, 48), uri, verseKey: verse.key });
           beginPlaybackSource(playbackCompletionRef.current);
           player.replace({ uri, name: `Translation ${verse.key}` });
+          player.setPlaybackRate(1, 'high');
           setPlayerVolume(player, queue.volume);
           pruneTranslationCache(index);
           prefetchTranslations(index + 1, session, queue);
@@ -276,6 +279,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
         localAudioUriRef.current = localUri;
         beginPlaybackSource(playbackCompletionRef.current);
         player.replace({ uri, name: verse.key });
+        player.setPlaybackRate(queue.recitationRate, 'high');
         setPlayerVolume(player, queue.volume);
         readySessionRef.current = session;
         if (pausedRef.current) setState((current) => ({ ...current, status: 'paused' }));
@@ -396,6 +400,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
       rate = getTtsSpeed(null).value,
       pitch = 1,
       volume = 1,
+      recitationRate = 1,
       repeats: PlaybackRepeats = { range: 1, ayah: 1 },
     ) => {
       clearTranslationCache();
@@ -415,6 +420,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
         rate,
         pitch,
         volume: Math.max(0, Math.min(1, volume)),
+        recitationRate: Math.max(1, Math.min(2, recitationRate)),
         repeats: {
           range: Math.max(1, repeats.range),
           ayah: Math.max(1, repeats.ayah),

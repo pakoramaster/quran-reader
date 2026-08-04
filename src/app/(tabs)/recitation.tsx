@@ -30,6 +30,7 @@ const keys = {
   rangeRepeat: 'recitation_range_repeat',
   ayahRepeat: 'recitation_ayah_repeat',
   volume: 'recitation_volume',
+  speed: 'recitation_speed',
 } as const;
 
 const verseViewabilityConfig = { itemVisiblePercentThreshold: 20 };
@@ -68,6 +69,7 @@ export default function RecitationScreen() {
   const [rangeRepeatOverride, setRangeRepeatOverride] = useState<number>();
   const [ayahRepeatOverride, setAyahRepeatOverride] = useState<number>();
   const [volumeOverride, setVolumeOverride] = useState<number>();
+  const [speedOverride, setSpeedOverride] = useState<number>();
   const [sheetProgress] = useState(() => new Animated.Value(0));
   const openSettings = useCallback(() => {
     sheetProgress.setValue(0);
@@ -113,6 +115,7 @@ export default function RecitationScreen() {
       rangeRepeat: await getSetting(userDb, keys.rangeRepeat),
       ayahRepeat: await getSetting(userDb, keys.ayahRepeat),
       volume: await getSetting(userDb, keys.volume),
+      speed: await getSetting(userDb, keys.speed),
       voiceProfile: await getSetting(userDb, 'tts_voice_profile'),
       voiceSpeed: await getSetting(userDb, 'tts_speed'),
       speechEngine: await getSetting(userDb, 'tts_engine'),
@@ -136,6 +139,7 @@ export default function RecitationScreen() {
   const rangeRepeat = rangeRepeatOverride ?? bounded(stored.data?.rangeRepeat ?? null, 1, 1, 20);
   const ayahRepeat = ayahRepeatOverride ?? bounded(stored.data?.ayahRepeat ?? null, 1, 1, 20);
   const volume = volumeOverride ?? bounded(stored.data?.volume ?? null, 0.8, 0, 1);
+  const speed = speedOverride ?? bounded(stored.data?.speed ?? null, 1, 1, 2);
   const voiceProfileId = isVoiceProfileId(stored.data?.voiceProfile) ? stored.data.voiceProfile : DEFAULT_VOICE_PROFILE_ID;
   const voiceSpeed = getTtsSpeed(isTtsSpeedId(stored.data?.voiceSpeed) ? stored.data.voiceSpeed : null);
   const speechEngineId = isSpeechEngineId(stored.data?.speechEngine) ? stored.data.speechEngine : DEFAULT_SPEECH_ENGINE_ID;
@@ -177,6 +181,15 @@ export default function RecitationScreen() {
     return () => controller.abort();
   }, [playbackRows, selectedIndex, speechEngineId, translation, voiceProfileId, voiceSpeed.value]);
   const currentIndex = playbackRows.findIndex((verse) => verse.key === speech.currentVerseKey);
+  const toggleFollowingPlayback = () => {
+    setFollowingPlayback((current) => {
+      const next = !current;
+      if (next && currentIndex >= 0) {
+        requestAnimationFrame(() => verseListRef.current?.scrollToIndex({ animated: true, index: currentIndex, viewPosition: 0.42 }));
+      }
+      return next;
+    });
+  };
   const currentSurahNumber = currentIndex >= 0 ? (playbackRows[currentIndex]?.surahNumber ?? null) : null;
   const visibleSurahDistance =
     currentSurahNumber === null || visibleSurahs === null
@@ -254,6 +267,7 @@ export default function RecitationScreen() {
       voiceSpeed.value,
       1,
       volume,
+      speed,
       { range: rangeRepeat, ayah: ayahRepeat, startAt },
     );
   };
@@ -262,7 +276,6 @@ export default function RecitationScreen() {
     const verse = playbackRows[index];
     if (!verse) return;
     setSelectedVerseKey(verse.key);
-    setFollowingPlayback(true);
     verseListRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.42 });
     if (speech.status !== 'idle') beginPlayback(index);
   };
@@ -300,6 +313,17 @@ export default function RecitationScreen() {
     </View>
   );
   const volumeControl = <CompactVolumeControl onChange={changeVolume} value={volume} />;
+  const followControl = (
+    <Pressable
+      accessibilityLabel={followingPlayback ? 'Disable follow along' : 'Enable follow along'}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: followingPlayback }}
+      onPress={toggleFollowingPlayback}
+      style={[styles.compactControl, followingPlayback ? styles.compactControlSelected : null]}
+    >
+      <Ionicons color={followingPlayback ? colors.paperLight : colors.emerald} name={followingPlayback ? 'locate' : 'locate-outline'} size={20} />
+    </Pressable>
+  );
   const settingsControl = (
     <Pressable accessibilityLabel="Open settings" onPress={openSettings} style={styles.compactControl}>
       <Ionicons color={colors.emerald} name="options-outline" size={20} />
@@ -345,7 +369,6 @@ export default function RecitationScreen() {
               </>
             }
             ListEmptyComponent={versesLoading ? <ActivityIndicator color={colors.gold} size="large" style={styles.listLoader} /> : null}
-            onScrollBeginDrag={() => setFollowingPlayback(false)}
             onScrollToIndexFailed={({ index }) => setTimeout(() => verseListRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.42 }), 250)}
             onViewableItemsChanged={handleViewableItemsChanged}
             ref={verseListRef}
@@ -391,6 +414,7 @@ export default function RecitationScreen() {
                 </>
               );
             }}
+            scrollEnabled={!followingPlayback || speech.status === 'idle'}
             showsVerticalScrollIndicator={false}
             viewabilityConfig={verseViewabilityConfig}
           />
@@ -401,6 +425,7 @@ export default function RecitationScreen() {
                 {playControl}
                 {statusControl}
                 {volumeControl}
+                {followControl}
                 {settingsControl}
               </>
             ) : (
@@ -410,6 +435,7 @@ export default function RecitationScreen() {
                   {stopControl}
                   {playControl}
                   {volumeControl}
+                  {followControl}
                   {settingsControl}
                 </View>
               </>
@@ -489,6 +515,24 @@ export default function RecitationScreen() {
 
                 <SettingSection title="Volume">
                   <Stepper label="Playback volume" max={100} min={0} onChange={(next) => changeVolume(next / 100)} suffix="%" step={10} value={Math.round(volume * 100)} />
+                </SettingSection>
+
+                <SettingSection title="Recitation speed">
+                  <Stepper
+                    displayValue={`${speed.toFixed(1)}×`}
+                    label="Qur’an recitation speed"
+                    max={20}
+                    min={10}
+                    onChange={(next) => {
+                      const nextSpeed = next / 10;
+                      stopForChange();
+                      setSpeedOverride(nextSpeed);
+                      persistNumber(keys.speed, nextSpeed);
+                    }}
+                    step={1}
+                    value={Math.round(speed * 10)}
+                  />
+                  <Text style={styles.help}>Changes the reciter audio speed while preserving the voice pitch. Translation speech speed is configured separately.</Text>
                 </SettingSection>
 
                 <SettingSection title="Surah range">
@@ -574,6 +618,7 @@ function Stepper({
   max,
   step = 1,
   suffix = '',
+  displayValue,
   onChange,
 }: {
   label: string;
@@ -582,6 +627,7 @@ function Stepper({
   max: number;
   step?: number;
   suffix?: string;
+  displayValue?: string;
   onChange: (value: number) => void;
 }) {
   return (
@@ -589,8 +635,7 @@ function Stepper({
       <View style={styles.stepperCopy}>
         <Text style={styles.stepperLabel}>{label}</Text>
         <Text style={styles.stepperValue}>
-          {value}
-          {suffix}
+          {displayValue ?? `${value}${suffix}`}
         </Text>
       </View>
       <View style={styles.stepperButtons}>
@@ -679,6 +724,7 @@ const styles = StyleSheet.create({
     width: Platform.OS === 'web' ? 'auto' : '94%',
   },
   compactControl: { alignItems: 'center', borderRadius: 18, height: 38, justifyContent: 'center', width: 34 },
+  compactControlSelected: { backgroundColor: colors.emerald },
   compactPlayControl: { alignItems: 'center', backgroundColor: colors.emerald, borderRadius: 22, height: 44, justifyContent: 'center', width: 44 },
   controllerStatus: { flexShrink: 1, minWidth: 110, paddingHorizontal: 4 },
   controllerStatusMobile: { alignItems: 'flex-start', minWidth: 0, paddingHorizontal: 12, width: '100%' },
