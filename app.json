@@ -3,6 +3,7 @@
     "name": "Quran Folio",
     "slug": "quran-folio",
     "version": "0.1.4",
+    "icon": "./assets/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "scheme": "quranfolio",
@@ -20,17 +21,21 @@
       "typedRoutes": true
     },
     "ios": {
+      "icon": "./assets/icon.png",
       "supportsTablet": true,
       "bundleIdentifier": "com.quranfolio.app"
     },
     "android": {
+      "icon": "./assets/icon.png",
       "package": "com.quranfolio.app",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#163F36"
       }
     },
     "web": {
       "bundler": "metro",
+      "favicon": "./assets/icon.png",
       "output": "single"
     }
   }

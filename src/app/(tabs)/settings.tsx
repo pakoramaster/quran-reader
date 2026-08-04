@@ -138,10 +138,9 @@ export default function SettingsScreen() {
       if (!bytes) return;
       const { summary } = inspectBackupArchive(bytes);
       requestConfirmation({
-        title: 'Replace local data with this backup?',
-        message: `Created ${new Date(summary.createdAt).toLocaleString()}. It contains ${summary.translationCount} translations, ${summary.annotationCount} notes or highlights, and ${summary.downloadedSurahCount} downloaded recitations. Current local data will be replaced.`,
+        title: 'Restore items from this backup?',
+        message: `Created ${new Date(summary.createdAt).toLocaleString()}. It contains ${summary.translationCount} translations, ${summary.annotationCount} notes or highlights, and ${summary.downloadedSurahCount} downloaded recitations. Matching items will be updated; other local data and preferences will stay unchanged.`,
         confirmLabel: 'Restore backup',
-        destructive: true,
         onConfirm: () => restore.mutate(bytes),
       });
     } catch (error) {
@@ -359,7 +358,7 @@ export default function SettingsScreen() {
         <FolioButton label="Create backup" loading={backup.isPending} onPress={() => backup.mutate()} style={styles.testButton} />
         <FolioButton label="Restore from backup" loading={restore.isPending} onPress={() => void chooseBackupToRestore()} style={styles.restoreButton} variant="secondary" />
         <Text style={styles.footnote}>
-          Restoring replaces the user data currently stored on this device. The verified Arabic Quran database is bundled with the app and is not duplicated in backups.
+          Restoring updates matching backup items and keeps other local data and current preferences unchanged. The verified Arabic Quran database is bundled with the app and is not duplicated in backups.
         </Text>
       </Section>
 
