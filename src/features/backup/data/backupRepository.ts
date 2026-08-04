@@ -4,7 +4,6 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import { runAtomicWrite } from '@/platform/database/runAtomicWrite';
 import { getReciter, type ReciterId } from '@/features/recitation/domain/reciters';
 import {
-  deleteDownloadedSurahFiles,
   readDownloadedRecitationFile,
   writeDownloadedRecitationFile,
 } from '@/features/recitation/data/recitationFileStore';
@@ -150,19 +149,29 @@ export function inspectBackupArchive(bytes: Uint8Array): { backup: QuranFolioBac
 
 export async function restoreBackupArchive(db: SQLiteDatabase, bytes: Uint8Array): Promise<BackupSummary> {
   const { backup, files, summary } = inspectBackupArchive(bytes);
-  const currentDownloads = await db.getAllAsync<{ reciter_id: ReciterId; surah_number: number }>('SELECT reciter_id, surah_number FROM recitation_downloads');
   for (const audio of backup.audioFiles) await writeDownloadedRecitationFile(audio.reciterId, audio.verseKey, files[audio.path]!);
 
   await runAtomicWrite(db, async (transaction) => {
-    await transaction.execAsync(`DELETE FROM annotations; DELETE FROM translation_verses; DELETE FROM translations; DELETE FROM app_settings; DELETE FROM recitation_downloads;`);
     for (const translation of backup.translations) {
       const item = translation.manifest;
       await transaction.runAsync(
         `INSERT INTO translations (id, title, language, translator, source_name, source_url, license_name, license_url,
-          format_version, content_sha256, imported_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+          format_version, content_sha256, imported_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+          title = excluded.title,
+          language = excluded.language,
+          translator = excluded.translator,
+          source_name = excluded.source_name,
+          source_url = excluded.source_url,
+          license_name = excluded.license_name,
+          license_url = excluded.license_url,
+          content_sha256 = excluded.content_sha256,
+          imported_at = excluded.imported_at,
+          updated_at = excluded.updated_at`,
         item.id, item.title, item.language, item.translator, item.source.name, item.source.url,
         item.license.name, item.license.url, translation.contentSha256, translation.importedAt, translation.updatedAt,
       );
+      await transaction.runAsync('DELETE FROM translation_verses WHERE translation_id = ?', item.id);
       for (const verse of item.verses) {
         const [surah = 0, ayah = 0] = verse.key.split(':').map(Number);
         await transaction.runAsync(
@@ -174,23 +183,28 @@ export async function restoreBackupArchive(db: SQLiteDatabase, bytes: Uint8Array
     for (const annotation of backup.annotations) {
       await transaction.runAsync(
         `INSERT INTO annotations (translation_id, surah_number, ayah_number, note_text, highlight_color, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(surah_number, ayah_number) DO UPDATE SET
+          translation_id = excluded.translation_id,
+          note_text = excluded.note_text,
+          highlight_color = excluded.highlight_color,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at`,
         annotation.translationId, annotation.surahNumber, annotation.ayahNumber, annotation.noteText,
         annotation.highlightColor, annotation.createdAt, annotation.updatedAt,
       );
     }
-    for (const setting of backup.settings) await transaction.runAsync('INSERT INTO app_settings (key, value) VALUES (?, ?)', setting.key, setting.value);
     for (const download of backup.downloads) {
       await transaction.runAsync(
-        'INSERT INTO recitation_downloads (reciter_id, surah_number, verse_count, byte_count, downloaded_at) VALUES (?, ?, ?, ?, ?)',
+        `INSERT INTO recitation_downloads (reciter_id, surah_number, verse_count, byte_count, downloaded_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(reciter_id, surah_number) DO UPDATE SET
+          verse_count = excluded.verse_count,
+          byte_count = excluded.byte_count,
+          downloaded_at = excluded.downloaded_at`,
         download.reciterId, download.surahNumber, download.verseCount, download.byteCount, download.downloadedAt,
       );
     }
   });
-
-  const restored = new Set(backup.downloads.map((item) => `${item.reciterId}:${item.surahNumber}`));
-  await Promise.all(currentDownloads
-    .filter((item) => !restored.has(`${item.reciter_id}:${item.surah_number}`))
-    .map((item) => deleteDownloadedSurahFiles(item.reciter_id, item.surah_number)));
   return summary;
 }
