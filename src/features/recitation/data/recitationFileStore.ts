@@ -2,6 +2,7 @@ import { Directory, File, Paths } from 'expo-file-system';
 
 import { getRecitationUrl, type ReciterId } from '@/features/recitation/domain/reciters';
 import type { VerseKey } from '@/types/domain';
+import { throwIfDownloadAborted } from './downloadAbort';
 
 function surahDirectory(reciterId: ReciterId, surahNumber: number) {
   return new Directory(Paths.document, 'recitations', reciterId, String(surahNumber));
@@ -13,7 +14,7 @@ function verseFile(reciterId: ReciterId, verseKey: VerseKey) {
 }
 
 export async function downloadRecitationFile(reciterId: ReciterId, verseKey: VerseKey, signal?: AbortSignal): Promise<number> {
-  signal?.throwIfAborted();
+  throwIfDownloadAborted(signal);
   const directory = surahDirectory(reciterId, Number(verseKey.split(':')[0]));
   directory.create({ intermediates: true, idempotent: true });
   const output = await File.downloadFileAsync(
@@ -21,7 +22,7 @@ export async function downloadRecitationFile(reciterId: ReciterId, verseKey: Ver
     verseFile(reciterId, verseKey),
     { idempotent: true },
   );
-  signal?.throwIfAborted();
+  throwIfDownloadAborted(signal);
   return output.size;
 }
 

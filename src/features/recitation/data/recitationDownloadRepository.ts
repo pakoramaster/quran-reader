@@ -2,6 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import type { ReciterId } from '@/features/recitation/domain/reciters';
 import type { VerseKey } from '@/types/domain';
+import { throwIfDownloadAborted } from './downloadAbort';
 import { deleteDownloadedSurahFiles, downloadRecitationFile } from './recitationFileStore';
 
 export interface RecitationDownload {
@@ -64,7 +65,7 @@ export async function downloadSurahRecitation(
   onProgress?: (completed: number, total: number) => void,
   signal?: AbortSignal,
 ): Promise<RecitationDownload> {
-  signal?.throwIfAborted();
+  throwIfDownloadAborted(signal);
   let cursor = 0;
   let completed = 0;
   let byteCount = 0;
@@ -85,7 +86,7 @@ export async function downloadSurahRecitation(
   const results = await Promise.allSettled(workers);
   if (signal?.aborted) {
     await deleteDownloadedSurahFiles(reciterId, surahNumber);
-    signal.throwIfAborted();
+    throwIfDownloadAborted(signal);
   }
   const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
   if (failed) throw failed.reason;
@@ -113,14 +114,14 @@ export async function downloadReciterRecitations(
   onProgress?: (progress: ReciterDownloadProgress) => void,
   options?: ReciterDownloadOptions,
 ): Promise<ReciterDownloadResult> {
-  options?.signal?.throwIfAborted();
+  throwIfDownloadAborted(options?.signal);
   const existing = new Set((await listRecitationDownloads(db)).filter((item) => item.reciterId === reciterId).map((item) => item.surahNumber));
   const pending = surahs.filter((surah) => !existing.has(surah.number));
   const skippedSurahs = surahs.length - pending.length;
   let downloadedSurahs = 0;
 
   for (const surah of pending) {
-    options?.signal?.throwIfAborted();
+    throwIfDownloadAborted(options?.signal);
     const verseKeys = Array.from({ length: surah.ayahCount }, (_, index) => `${surah.number}:${index + 1}` as VerseKey);
     const download = await downloadSurahRecitation(db, reciterId, surah.number, verseKeys, (currentAyah, currentSurahTotalAyahs) => {
       onProgress?.({
