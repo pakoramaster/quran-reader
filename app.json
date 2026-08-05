@@ -4,7 +4,7 @@
     "slug": "quran-folio",
     "version": "0.1.4",
     "icon": "./assets/icon.png",
-    "orientation": "portrait",
+    "orientation": "default",
     "userInterfaceStyle": "automatic",
     "scheme": "quranfolio",
     "plugins": [
