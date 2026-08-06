@@ -80,6 +80,24 @@ describe('recitation downloads', () => {
     expect(result).toEqual({ downloadedSurahs: 2, skippedSurahs: 1, totalSurahs: 3 });
   });
 
+  it('supports Android AbortSignals without throwIfAborted', async () => {
+    downloadFile.mockResolvedValue(10);
+    const getAllAsync = jest.fn().mockResolvedValue([]);
+    const runAsync = jest.fn().mockResolvedValue(undefined);
+    const androidSignal = { aborted: false } as AbortSignal;
+
+    await expect(downloadReciterRecitations(
+      { getAllAsync, runAsync } as never,
+      'husary',
+      [{ number: 1, ayahCount: 2 }],
+      undefined,
+      { signal: androidSignal },
+    )).resolves.toEqual({ downloadedSurahs: 1, skippedSurahs: 0, totalSurahs: 1 });
+
+    expect(downloadFile).toHaveBeenCalledWith('husary', '1:1', androidSignal);
+    expect(runAsync).toHaveBeenCalledTimes(1);
+  });
+
   it('cancels a complete-reciter download without recording a partial Surah', async () => {
     const controller = new AbortController();
     downloadFile.mockImplementation(async () => {
