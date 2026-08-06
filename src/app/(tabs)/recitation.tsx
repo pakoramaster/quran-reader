@@ -61,6 +61,7 @@ export default function RecitationScreen() {
   const [rangePicker, setRangePicker] = useState<'start' | 'end' | null>(null);
   const [selectedVerseKey, setSelectedVerseKey] = useState<VerseKey | null>(null);
   const [followingPlayback, setFollowingPlayback] = useState(true);
+  const [playerMinimized, setPlayerMinimized] = useState(false);
   const [visibleSurahs, setVisibleSurahs] = useState<{ first: number; last: number } | null>(null);
   const [reciterOverride, setReciterOverride] = useState<ReciterId | null | undefined>();
   const [translationOverride, setTranslationOverride] = useState<string | null | undefined>();
@@ -329,13 +330,18 @@ export default function RecitationScreen() {
       <Ionicons color={colors.emerald} name="options-outline" size={20} />
     </Pressable>
   );
+  const minimizeControl = (
+    <Pressable accessibilityLabel="Minimize playhead" onPress={() => setPlayerMinimized(true)} style={styles.compactControl}>
+      <Ionicons color={colors.emerald} name="chevron-down" size={20} />
+    </Pressable>
+  );
 
   return (
     <>
       <FolioScreen contentStyle={styles.screen} scroll={false}>
         <View style={styles.verseListShell}>
           <FlatList
-            contentContainerStyle={styles.verseList}
+            contentContainerStyle={[styles.verseList, playerMinimized ? styles.verseListPlayerMinimized : null]}
             data={playbackRows}
             keyExtractor={(item) => item.key}
             ListHeaderComponent={
@@ -418,29 +424,37 @@ export default function RecitationScreen() {
             showsVerticalScrollIndicator={false}
             viewabilityConfig={verseViewabilityConfig}
           />
-          <View style={styles.stickyControls}>
-            {Platform.OS === 'web' ? (
-              <>
-                {stopControl}
-                {playControl}
-                {statusControl}
-                {volumeControl}
-                {followControl}
-                {settingsControl}
-              </>
-            ) : (
-              <>
-                {statusControl}
-                <View style={styles.mobileControlRow}>
+          {playerMinimized ? (
+            <Pressable accessibilityLabel="Show playhead" onPress={() => setPlayerMinimized(false)} style={styles.minimizedPlayerButton}>
+              <Ionicons color={colors.paperLight} name="chevron-up" size={12} />
+            </Pressable>
+          ) : (
+            <View style={styles.stickyControls}>
+              {Platform.OS === 'web' ? (
+                <>
                   {stopControl}
                   {playControl}
+                  {statusControl}
                   {volumeControl}
                   {followControl}
+                  {minimizeControl}
                   {settingsControl}
-                </View>
-              </>
-            )}
-          </View>
+                </>
+              ) : (
+                <>
+                  {statusControl}
+                  <View style={styles.mobileControlRow}>
+                    {stopControl}
+                    {playControl}
+                    {volumeControl}
+                    {followControl}
+                    {minimizeControl}
+                    {settingsControl}
+                  </View>
+                </>
+              )}
+            </View>
+          )}
           {showFollowPrompt ? (
             <Pressable
               accessibilityLabel="Follow the currently playing Ayah"
@@ -672,6 +686,7 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.35 },
   verseListShell: { flex: 1, position: 'relative' },
   verseList: { paddingBottom: Platform.OS === 'web' ? 118 : 158 },
+  verseListPlayerMinimized: { paddingBottom: 76 },
   verseHeading: {
     alignItems: Platform.OS === 'web' ? 'flex-end' : 'flex-start',
     flexDirection: Platform.OS === 'web' ? 'row' : 'column',
@@ -726,6 +741,17 @@ const styles = StyleSheet.create({
   compactControl: { alignItems: 'center', borderRadius: 18, height: 38, justifyContent: 'center', width: 34 },
   compactControlSelected: { backgroundColor: colors.emerald },
   compactPlayControl: { alignItems: 'center', backgroundColor: colors.emerald, borderRadius: 22, height: 44, justifyContent: 'center', width: 44 },
+  minimizedPlayerButton: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: colors.emerald,
+    borderRadius: 16,
+    bottom: 12,
+    height: 32,
+    justifyContent: 'center',
+    position: 'absolute',
+    width: 32,
+  },
   controllerStatus: { flexShrink: 1, minWidth: 110, paddingHorizontal: 4 },
   controllerStatusMobile: { alignItems: 'flex-start', minWidth: 0, paddingHorizontal: 12, width: '100%' },
   mobileControlRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-around', width: '100%' },
