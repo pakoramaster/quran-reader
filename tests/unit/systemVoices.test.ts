@@ -16,6 +16,6 @@ describe('system speech voices', () => {
   });
 
   it('uses visibly different rates for system synthesizers', () => {
-    expect([1, 1.1, 1.2, 1.3].map(getSystemSpeechRate)).toEqual([0.8, 1, 1.25, 1.5]);
+    expect([0.9, 1, 1.1, 1.2, 1.3].map(getSystemSpeechRate)).toEqual([0.5, 0.75, 1, 1.25, 1.5]);
   });
 });

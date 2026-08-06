@@ -19,7 +19,8 @@ export function filterSystemVoices(voices: readonly SystemVoice[], language: str
 }
 
 export function getSystemSpeechRate(kokoroRate: number): number {
-  if (kokoroRate <= 1) return 0.8;
+  if (kokoroRate <= 0.9) return 0.5;
+  if (kokoroRate <= 1) return 0.75;
   if (kokoroRate <= 1.1) return 1;
   if (kokoroRate <= 1.2) return 1.25;
   return 1.5;
