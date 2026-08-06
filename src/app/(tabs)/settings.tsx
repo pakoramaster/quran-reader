@@ -18,7 +18,7 @@ import { ensureUniformVoiceModel } from '@/features/speech/data/uniformTtsEngine
 import { DEFAULT_SPEECH_ENGINE_ID, isSpeechEngineId, SPEECH_ENGINES, type SpeechEngineId } from '@/features/speech/domain/speechEngines';
 import { DEFAULT_SYSTEM_VOICE_ID, getSystemSpeechRate } from '@/features/speech/domain/systemVoices';
 import { DEFAULT_VOICE_PROFILE_ID, isVoiceProfileId, VOICE_PROFILES, type VoiceProfileId } from '@/features/speech/domain/voiceProfiles';
-import { DEFAULT_TTS_SPEED_ID, getTtsSpeed, isTtsSpeedId, TTS_SPEEDS, type TtsSpeedId } from '@/features/speech/domain/ttsSpeeds';
+import { DEFAULT_TTS_SPEED_ID, getTtsSpeed, isTtsSpeedId, SYSTEM_TTS_SPEEDS, TTS_SPEEDS, type TtsSpeedId } from '@/features/speech/domain/ttsSpeeds';
 import { getActiveTranslationId, getTranslation } from '@/features/translations/data/translationRepository';
 import { pickBackupFile, saveBackupFile } from '@/platform/backups/backupFiles';
 import { requestConfirmation, showMessage } from '@/platform/dialogs/dialogs';
@@ -176,7 +176,8 @@ export default function SettingsScreen() {
   };
   const selectSpeechEngine = (engineId: SpeechEngineId) => {
     stopForSpeechSettingsChange();
-    setSpeechDraft({ engineId, language: currentLanguage, profileId: selectedProfileId, speedId: selectedSpeedId, systemVoiceId: selectedSystemVoiceId });
+    const speedId = engineId === 'kokoro' && !TTS_SPEEDS.some((speed) => speed.id === selectedSpeedId) ? DEFAULT_TTS_SPEED_ID : selectedSpeedId;
+    setSpeechDraft({ engineId, language: currentLanguage, profileId: selectedProfileId, speedId, systemVoiceId: selectedSystemVoiceId });
   };
   const selectSystemVoice = (systemVoiceId: string) => {
     stopForSpeechSettingsChange();
@@ -311,7 +312,7 @@ export default function SettingsScreen() {
               </>
             )}
             <Text style={styles.preferenceLabel}>Translation speech speed</Text>
-            {TTS_SPEEDS.map((speed) => {
+            {(selectedEngineId === 'system' ? SYSTEM_TTS_SPEEDS : TTS_SPEEDS).map((speed) => {
               const selected = selectedSpeedId === speed.id;
               return (
                 <Pressable
