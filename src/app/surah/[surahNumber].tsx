@@ -214,7 +214,14 @@ export default function SurahReaderScreen() {
         <Text style={styles.headerArabic}>{surah.data.nameArabic}</Text>
       </View>
 
-      <View style={styles.playbackOptions}>
+      <FlatList
+        contentContainerStyle={styles.list}
+        data={readerAyahs}
+        initialNumToRender={10}
+        keyExtractor={(item) => item.verseKey}
+        ListHeaderComponent={(
+          <View style={styles.scrollableHeader}>
+            <View style={styles.playbackOptions}>
         <View style={styles.chipRow}>
           {(['recitation', 'translation', 'both'] as const).map((mode) => {
             const disabled = mode !== 'recitation' && !activeTranslation.data;
@@ -242,7 +249,7 @@ export default function SurahReaderScreen() {
             ))}
           </View>
         ) : null}
-      </View>
+            </View>
 
       {playbackMode === 'recitation' || activeTranslation.data ? (
         <View style={styles.playbackBar}>
@@ -283,11 +290,8 @@ export default function SurahReaderScreen() {
         </Pressable>
       )}
 
-      <FlatList
-        contentContainerStyle={styles.list}
-        data={readerAyahs}
-        initialNumToRender={10}
-        keyExtractor={(item) => item.verseKey}
+          </View>
+        )}
         onScrollToIndexFailed={({ index }) => setTimeout(() => listRef.current?.scrollToIndex({ index, animated: true }), 400)}
         ref={listRef}
         renderItem={({ item }) => {
@@ -415,8 +419,9 @@ const styles = StyleSheet.create({
   playButton: { alignItems: 'center', borderColor: colors.border, borderRadius: 22, borderWidth: 1, height: 42, justifyContent: 'center', width: 42 },
   importPrompt: { alignItems: 'center', backgroundColor: colors.paperLight, borderBottomColor: colors.border, borderBottomWidth: 1, flexDirection: 'row', gap: 10, padding: 14 },
   importPromptText: { color: colors.ink, flex: 1, fontFamily: fontFamilies.body, fontSize: 16 },
-  list: { padding: 16, paddingBottom: 60 },
-  ayahCard: { backgroundColor: colors.paperLight, borderColor: colors.border, borderRadius: 3, borderWidth: 1, marginBottom: 14, padding: 18 },
+  list: { paddingBottom: 60 },
+  scrollableHeader: { marginBottom: 16 },
+  ayahCard: { backgroundColor: colors.paperLight, borderColor: colors.border, borderRadius: 3, borderWidth: 1, marginBottom: 14, marginHorizontal: 16, padding: 18 },
   ayahCardPressed: { opacity: 0.82 },
   selectedCard: { borderColor: colors.gold, borderWidth: 2 },
   speakingCard: { borderColor: colors.gold, borderWidth: 2 },

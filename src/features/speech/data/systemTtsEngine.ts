@@ -17,10 +17,60 @@ export interface SystemSpeechOptions {
   onStopped: () => void;
 }
 
+interface AndroidSpeechState {
+  boundaryIndex: number;
+  invocation: number;
+  normalized: string;
+  options: SystemSpeechOptions;
+  paused: boolean;
+}
+
+let androidSpeech: AndroidSpeechState | null = null;
+let androidInvocation = 0;
+
+function speakOnAndroid(state: AndroidSpeechState): void {
+  const invocation = ++androidInvocation;
+  state.invocation = invocation;
+  const offset = state.boundaryIndex;
+  Speech.speak(state.normalized.slice(offset), {
+    language: state.options.language,
+    onBoundary: (event: { charIndex: number }) => {
+      if (androidSpeech?.invocation !== invocation) return;
+      androidSpeech.boundaryIndex = Math.min(androidSpeech.normalized.length, offset + event.charIndex);
+    },
+    onDone: () => {
+      if (androidSpeech?.invocation !== invocation || androidSpeech.paused) return;
+      androidSpeech = null;
+      state.options.onDone();
+    },
+    onError: (error) => {
+      if (androidSpeech?.invocation !== invocation || androidSpeech.paused) return;
+      androidSpeech = null;
+      state.options.onError(error);
+    },
+    onStart: state.options.onStart,
+    onStopped: () => {
+      if (androidSpeech?.invocation !== invocation || androidSpeech.paused) return;
+      androidSpeech = null;
+      state.options.onStopped();
+    },
+    pitch: Math.max(0.5, Math.min(2, state.options.pitch)),
+    rate: getSystemSpeechRate(clampTtsSpeed(state.options.rate)),
+    volume: Math.max(0, Math.min(1, state.options.volume)),
+    voice: state.options.voice,
+  });
+}
+
 export function speakWithSystemVoice(text: string, options: SystemSpeechOptions): void {
   const normalized = normalizeTtsText(text);
   if (!normalized) {
     options.onError(new Error('Translation speech text is empty.'));
+    return;
+  }
+
+  if (Platform.OS === 'android') {
+    androidSpeech = { boundaryIndex: 0, invocation: 0, normalized, options, paused: false };
+    speakOnAndroid(androidSpeech);
     return;
   }
 
@@ -51,17 +101,28 @@ export async function listSystemVoices(language: string): Promise<SystemVoice[]>
 }
 
 export function stopSystemVoice(): Promise<void> {
+  androidSpeech = null;
+  androidInvocation += 1;
   return Speech.stop();
 }
 
 export function pauseSystemVoice(): Promise<void> {
-  return Platform.OS === 'android' ? Speech.stop() : Speech.pause();
+  if (Platform.OS !== 'android') return Speech.pause();
+  if (androidSpeech) androidSpeech.paused = true;
+  return Speech.stop();
 }
 
 export function resumeSystemVoice(): Promise<void> {
+  if (Platform.OS === 'android') {
+    if (androidSpeech?.paused) {
+      androidSpeech.paused = false;
+      speakOnAndroid(androidSpeech);
+    }
+    return Promise.resolve();
+  }
   return Speech.resume();
 }
 
 export function systemVoiceCanResume(): boolean {
-  return Platform.OS !== 'android';
+  return Platform.OS !== 'android' || Boolean(androidSpeech?.paused);
 }
