@@ -8,6 +8,7 @@ dist/
 web-build/
 release/
 release-win7/
+release-*/
 expo-env.d.ts
 .metro-health-check*
 

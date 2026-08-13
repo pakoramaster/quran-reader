@@ -5,7 +5,7 @@ import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { type PlaybackMode, type ReciterId } from '@/features/recitation/domain/reciters';
 import { releaseDownloadedRecitationUri } from '@/features/recitation/data/recitationFileStore';
 import { resolveRecitationPlaybackSource } from '@/features/recitation/data/recitationPlaybackSource';
-import { getSetting } from '@/features/settings/data/settingsRepository';
+import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
 import { pauseSystemVoice, resumeSystemVoice, speakWithSystemVoice, stopSystemVoice, systemVoiceCanResume } from '@/features/speech/data/systemTtsEngine';
 import { releaseUniformSpeechUri, synthesizeUniformSpeech, warmUniformVoiceEngine } from '@/features/speech/data/uniformTtsEngine';
 import { DEFAULT_SPEECH_ENGINE_ID, isSpeechEngineId, type SpeechEngineId } from '@/features/speech/domain/speechEngines';
@@ -59,6 +59,7 @@ export interface PlaybackRepeats {
   range: number;
   ayah: number;
   startAt?: number;
+  resumeSettingKey?: string;
 }
 
 interface QueueConfig {
@@ -305,10 +306,13 @@ export function SpeechProvider({ children }: PropsWithChildren) {
         return;
       }
       indexRef.current = index;
+      if (queue.repeats.resumeSettingKey) {
+        void setSetting(userDb, queue.repeats.resumeSettingKey, verse.key);
+      }
       if (queue.mode === 'translation') beginTranslation(index, session);
       else beginRecitation(index, session);
     },
-    [beginRecitation, beginTranslation],
+    [beginRecitation, beginTranslation, userDb],
   );
 
   const advance = useCallback(
@@ -425,6 +429,7 @@ export function SpeechProvider({ children }: PropsWithChildren) {
           range: Math.max(1, repeats.range),
           ayah: Math.max(1, repeats.ayah),
           startAt: Math.max(0, Math.min(verses.length - 1, repeats.startAt ?? 0)),
+          resumeSettingKey: repeats.resumeSettingKey,
         },
       };
       indexRef.current = queueRef.current.repeats.startAt ?? 0;
