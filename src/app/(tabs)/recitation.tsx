@@ -9,6 +9,7 @@ import { FolioHeader, FolioScreen } from '@/components/FolioScreen';
 import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { listAyahsInRange, listSurahs } from '@/features/quran-reader/data/quranRepository';
 import { DEFAULT_RECITER_ID, getReciter, isReciterId, RECITERS, type ReciterId } from '@/features/recitation/domain/reciters';
+import { filterRecitationRange, resolveResumeVerseKey } from '@/features/recitation/domain/recitationRange';
 import { CompactVolumeControl } from '@/features/recitation/ui/CompactVolumeControl';
 import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
 import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
@@ -27,6 +28,9 @@ const keys = {
   translation: 'recitation_translation_id',
   start: 'recitation_start_surah',
   end: 'recitation_end_surah',
+  startAyah: 'recitation_start_ayah',
+  endAyah: 'recitation_end_ayah',
+  playhead: 'recitation_playhead_verse',
   rangeRepeat: 'recitation_range_repeat',
   ayahRepeat: 'recitation_ayah_repeat',
   volume: 'recitation_volume',
@@ -58,8 +62,9 @@ export default function RecitationScreen() {
   const verseListRef = useRef<FlatList<PlaybackRow>>(null);
   const volumeSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [rangePicker, setRangePicker] = useState<'start' | 'end' | null>(null);
+  const [rangePicker, setRangePicker] = useState<'startSurah' | 'endSurah' | 'startAyah' | 'endAyah' | null>(null);
   const [selectedVerseKey, setSelectedVerseKey] = useState<VerseKey | null>(null);
+  const [ownsPlayback, setOwnsPlayback] = useState(false);
   const [followingPlayback, setFollowingPlayback] = useState(true);
   const [playerMinimized, setPlayerMinimized] = useState(false);
   const [visibleSurahs, setVisibleSurahs] = useState<{ first: number; last: number } | null>(null);
@@ -67,6 +72,8 @@ export default function RecitationScreen() {
   const [translationOverride, setTranslationOverride] = useState<string | null | undefined>();
   const [startOverride, setStartOverride] = useState<number>();
   const [endOverride, setEndOverride] = useState<number>();
+  const [startAyahOverride, setStartAyahOverride] = useState<number>();
+  const [endAyahOverride, setEndAyahOverride] = useState<number>();
   const [rangeRepeatOverride, setRangeRepeatOverride] = useState<number>();
   const [ayahRepeatOverride, setAyahRepeatOverride] = useState<number>();
   const [volumeOverride, setVolumeOverride] = useState<number>();
@@ -113,6 +120,9 @@ export default function RecitationScreen() {
       translation: await getSetting(userDb, keys.translation),
       start: await getSetting(userDb, keys.start),
       end: await getSetting(userDb, keys.end),
+      startAyah: await getSetting(userDb, keys.startAyah),
+      endAyah: await getSetting(userDb, keys.endAyah),
+      playhead: await getSetting(userDb, keys.playhead),
       rangeRepeat: await getSetting(userDb, keys.rangeRepeat),
       ayahRepeat: await getSetting(userDb, keys.ayahRepeat),
       volume: await getSetting(userDb, keys.volume),
@@ -137,6 +147,11 @@ export default function RecitationScreen() {
   const translation = translations.data?.find((item) => item.id === requestedTranslationId) ?? null;
   const startSurah = startOverride ?? bounded(stored.data?.start ?? null, 1, 1, 114);
   const endSurah = Math.max(startSurah, endOverride ?? bounded(stored.data?.end ?? null, startSurah, 1, 114));
+  const startAyahCount = surahs.data?.[startSurah - 1]?.ayahCount ?? 286;
+  const endAyahCount = surahs.data?.[endSurah - 1]?.ayahCount ?? 286;
+  const startAyah = startAyahOverride ?? bounded(stored.data?.startAyah ?? null, 1, 1, startAyahCount);
+  const minimumEndAyah = startSurah === endSurah ? startAyah : 1;
+  const endAyah = Math.max(minimumEndAyah, endAyahOverride ?? bounded(stored.data?.endAyah ?? null, endAyahCount, 1, endAyahCount));
   const rangeRepeat = rangeRepeatOverride ?? bounded(stored.data?.rangeRepeat ?? null, 1, 1, 20);
   const ayahRepeat = ayahRepeatOverride ?? bounded(stored.data?.ayahRepeat ?? null, 1, 1, 20);
   const volume = volumeOverride ?? bounded(stored.data?.volume ?? null, 0.8, 0, 1);
@@ -161,17 +176,22 @@ export default function RecitationScreen() {
   });
   const playbackRows = useMemo<PlaybackRow[]>(() => {
     const translatedByKey = new Map(rangeTranslation.data?.map((verse) => [verse.key, verse.text]));
-    return (rangeAyahs.data ?? []).map((ayah) => ({
+    const rows = (rangeAyahs.data ?? []).map((ayah) => ({
       key: ayah.verseKey,
       surahNumber: ayah.surahNumber,
       ayahNumber: ayah.ayahNumber,
       arabic: ayah.textUthmani,
       translation: translatedByKey.get(ayah.verseKey) ?? null,
     }));
-  }, [rangeAyahs.data, rangeTranslation.data]);
+    return filterRecitationRange(rows, { startSurah, startAyah, endSurah, endAyah });
+  }, [endAyah, endSurah, rangeAyahs.data, rangeTranslation.data, startAyah, startSurah]);
+  const resumeVerseKey = resolveResumeVerseKey(
+    playbackRows,
+    ownsPlayback ? speech.currentVerseKey : selectedVerseKey ?? stored.data?.playhead ?? null,
+  );
   const selectedIndex = Math.max(
     0,
-    playbackRows.findIndex((verse) => verse.key === selectedVerseKey),
+    playbackRows.findIndex((verse) => verse.key === resumeVerseKey),
   );
 
   useEffect(() => {
@@ -181,6 +201,7 @@ export default function RecitationScreen() {
     void primeUniformSpeech(texts, voiceProfileId, voiceSpeed.value, controller.signal).catch(() => undefined);
     return () => controller.abort();
   }, [playbackRows, selectedIndex, speechEngineId, translation, voiceProfileId, voiceSpeed.value]);
+  const versesLoading = rangeAyahs.isLoading || (Boolean(translation) && rangeTranslation.isLoading);
   const currentIndex = playbackRows.findIndex((verse) => verse.key === speech.currentVerseKey);
   const toggleFollowingPlayback = () => {
     setFollowingPlayback((current) => {
@@ -201,7 +222,6 @@ export default function RecitationScreen() {
           ? currentSurahNumber - visibleSurahs.last
           : 0;
   const showFollowPrompt = !followingPlayback && currentIndex >= 0 && speech.status !== 'idle' && visibleSurahDistance >= 5;
-  const versesLoading = rangeAyahs.isLoading || (Boolean(translation) && rangeTranslation.isLoading);
   const handleViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken<PlaybackRow>[] }) => {
     const numbers = viewableItems.flatMap((token) => (token.item?.surahNumber ? [token.item.surahNumber] : []));
     if (!numbers.length) return;
@@ -242,9 +262,14 @@ export default function RecitationScreen() {
     stopForChange();
     setStartOverride(next);
     persistNumber(keys.start, next);
+    setStartAyahOverride(1);
+    persistNumber(keys.startAyah, 1);
     if (next > endSurah) {
       setEndOverride(next);
       persistNumber(keys.end, next);
+      const nextEndAyah = surahs.data?.[next - 1]?.ayahCount ?? 1;
+      setEndAyahOverride(nextEndAyah);
+      persistNumber(keys.endAyah, nextEndAyah);
     }
   };
   const changeEnd = (value: number) => {
@@ -252,10 +277,35 @@ export default function RecitationScreen() {
     stopForChange();
     setEndOverride(next);
     persistNumber(keys.end, next);
+    const nextEndAyah = surahs.data?.[next - 1]?.ayahCount ?? 1;
+    setEndAyahOverride(nextEndAyah);
+    persistNumber(keys.endAyah, nextEndAyah);
+  };
+  const changeStartAyah = (value: number) => {
+    const next = Math.max(1, Math.min(startAyahCount, value));
+    stopForChange();
+    setStartAyahOverride(next);
+    persistNumber(keys.startAyah, next);
+    if (startSurah === endSurah && next > endAyah) {
+      setEndAyahOverride(next);
+      persistNumber(keys.endAyah, next);
+    }
+  };
+  const changeEndAyah = (value: number) => {
+    const next = Math.max(minimumEndAyah, Math.min(endAyahCount, value));
+    stopForChange();
+    setEndAyahOverride(next);
+    persistNumber(keys.endAyah, next);
   };
 
   const beginPlayback = (startAt = selectedIndex) => {
     if (!hasSource || !playbackRows.length || versesLoading) return;
+    const startingVerse = playbackRows[startAt];
+    if (startingVerse) {
+      setOwnsPlayback(true);
+      setSelectedVerseKey(startingVerse.key);
+      void setSetting(userDb, keys.playhead, startingVerse.key);
+    }
     const mode = reciterId && translation ? 'both' : reciterId ? 'recitation' : 'translation';
     speech.play(
       playbackRows.map((ayah) => ({ key: ayah.key, text: ayah.translation ?? '' })),
@@ -269,20 +319,24 @@ export default function RecitationScreen() {
       1,
       volume,
       speed,
-      { range: rangeRepeat, ayah: ayahRepeat, startAt },
+      { range: rangeRepeat, ayah: ayahRepeat, startAt, resumeSettingKey: keys.playhead },
     );
   };
 
   const selectPlayhead = (index: number) => {
     const verse = playbackRows[index];
     if (!verse) return;
+    if (speech.status === 'idle') setOwnsPlayback(false);
     setSelectedVerseKey(verse.key);
+    void setSetting(userDb, keys.playhead, verse.key);
     verseListRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.42 });
     if (speech.status !== 'idle') beginPlayback(index);
   };
 
   const sourceLabel =
     reciterId && translation ? `${getReciter(reciterId).name} · ${translation.title}` : reciterId ? getReciter(reciterId).name : (translation?.title ?? 'Choose a reciter or translation');
+  const rangePickerIsAyah = rangePicker === 'startAyah' || rangePicker === 'endAyah';
+  const rangePickerIsStart = rangePicker === 'startSurah' || rangePicker === 'startAyah';
   const stopControl = (
     <Pressable accessibilityLabel="Stop" disabled={speech.status === 'idle'} onPress={() => void speech.stop()} style={[styles.compactControl, speech.status === 'idle' ? styles.disabled : null]}>
       <Ionicons color={colors.oxblood} name="stop" size={19} />
@@ -305,11 +359,11 @@ export default function RecitationScreen() {
   const statusControl = (
     <View style={[styles.controllerStatus, Platform.OS !== 'web' ? styles.controllerStatusMobile : null]}>
       <Text numberOfLines={1} style={styles.controllerRange}>
-        SURAH {startSurah}–{endSurah}
+        RANGE {startSurah}:{startAyah}–{endSurah}:{endAyah}
         {rangeRepeat > 1 ? ` · RANGE ${speech.status === 'idle' ? 1 : speech.rangeIteration}/${rangeRepeat}` : ''}
       </Text>
       <Text numberOfLines={1} style={styles.controllerAyah}>
-        {speech.status !== 'idle' && speech.currentVerseKey ? `Ayah ${speech.currentVerseKey}` : selectedVerseKey ? `Start ${selectedVerseKey}` : 'From the beginning'}
+        {speech.status !== 'idle' && speech.currentVerseKey ? `Ayah ${speech.currentVerseKey}` : resumeVerseKey ? `Start ${resumeVerseKey}` : 'From the beginning'}
       </Text>
     </View>
   );
@@ -352,7 +406,7 @@ export default function RecitationScreen() {
                     <View style={styles.playerCopy}>
                       <Text style={styles.sourceLabel}>{sourceLabel}</Text>
                       <Text style={styles.rangeLabel}>
-                        Surah {startSurah}–{endSurah} · {rangeRepeat}× range · {ayahRepeat}× each Ayah
+                        Ayah {startSurah}:{startAyah}–{endSurah}:{endAyah} · {rangeRepeat}× range · {ayahRepeat}× each Ayah
                       </Text>
                     </View>
                     <Ionicons color={hasSource ? colors.gold : colors.inkMuted} name="headset" size={30} />
@@ -380,7 +434,7 @@ export default function RecitationScreen() {
             ref={verseListRef}
             renderItem={({ item, index }) => {
               const playing = speech.status !== 'idle' && speech.currentVerseKey === item.key;
-              const selected = !playing && selectedVerseKey === item.key;
+              const selected = !playing && resumeVerseKey === item.key;
               const showSurah = index === 0 || playbackRows[index - 1]?.surahNumber !== item.surahNumber;
               return (
                 <>
@@ -477,26 +531,55 @@ export default function RecitationScreen() {
           <AnimatedSafeAreaView edges={['bottom']} style={[styles.sheet, sheetAnimatedStyle]}>
             <View style={styles.sheetHeader}>
               <View>
-                <Text style={styles.sheetEyebrow}>{rangePicker ? 'SURAH RANGE' : 'PLAYER PREFERENCES'}</Text>
-                <Text style={styles.sheetTitle}>{rangePicker ? `Choose ${rangePicker === 'start' ? 'starting' : 'ending'} Surah` : 'Recitation settings'}</Text>
+                <Text style={styles.sheetEyebrow}>{rangePicker ? 'RECITATION RANGE' : 'PLAYER PREFERENCES'}</Text>
+                <Text style={styles.sheetTitle}>{rangePicker ? `Choose ${rangePickerIsStart ? 'starting' : 'ending'} ${rangePickerIsAyah ? 'Ayah' : 'Surah'}` : 'Recitation settings'}</Text>
               </View>
               <Pressable accessibilityLabel={rangePicker ? 'Back to settings' : 'Close settings'} onPress={rangePicker ? () => setRangePicker(null) : closeSettings} style={styles.closeButton}>
                 <Ionicons color={colors.ink} name={rangePicker ? 'arrow-back' : 'close'} size={25} />
               </Pressable>
             </View>
-            {rangePicker ? (
+            {rangePickerIsAyah ? (
               <FlatList
                 contentContainerStyle={styles.pickerList}
-                data={(surahs.data ?? []).filter((surah) => rangePicker !== 'end' || surah.number >= startSurah)}
-                keyExtractor={(item) => String(item.number)}
+                data={Array.from(
+                  { length: rangePicker === 'startAyah' ? startAyahCount : endAyahCount },
+                  (_, index) => index + 1,
+                ).filter((ayah) => rangePicker !== 'endAyah' || startSurah !== endSurah || ayah >= startAyah)}
+                keyExtractor={(item) => String(item)}
                 renderItem={({ item }) => {
-                  const selected = item.number === (rangePicker === 'start' ? startSurah : endSurah);
+                  const selected = item === (rangePicker === 'startAyah' ? startAyah : endAyah);
+                  const surahNumber = rangePicker === 'startAyah' ? startSurah : endSurah;
                   return (
                     <Pressable
                       accessibilityRole="radio"
                       accessibilityState={{ checked: selected }}
                       onPress={() => {
-                        if (rangePicker === 'start') changeStart(item.number);
+                        if (rangePicker === 'startAyah') changeStartAyah(item);
+                        else changeEndAyah(item);
+                        setRangePicker(null);
+                      }}
+                      style={[styles.surahOption, selected ? styles.choiceSelected : null]}
+                    >
+                      <Text style={styles.surahNumber}>{item}</Text>
+                      <Text style={styles.surahName}>Ayah {surahNumber}:{item}</Text>
+                      {selected ? <Ionicons color={colors.emerald} name="checkmark-circle" size={21} /> : null}
+                    </Pressable>
+                  );
+                }}
+              />
+            ) : rangePicker ? (
+              <FlatList
+                contentContainerStyle={styles.pickerList}
+                data={(surahs.data ?? []).filter((surah) => rangePicker !== 'endSurah' || surah.number >= startSurah)}
+                keyExtractor={(item) => String(item.number)}
+                renderItem={({ item }) => {
+                  const selected = item.number === (rangePicker === 'startSurah' ? startSurah : endSurah);
+                  return (
+                    <Pressable
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: selected }}
+                      onPress={() => {
+                        if (rangePicker === 'startSurah') changeStart(item.number);
                         else changeEnd(item.number);
                         setRangePicker(null);
                       }}
@@ -550,8 +633,10 @@ export default function RecitationScreen() {
                 </SettingSection>
 
                 <SettingSection title="Surah range">
-                  <RangeChoice label="From" name={startName} number={startSurah} onPress={() => setRangePicker('start')} />
-                  <RangeChoice label="To" name={endName} number={endSurah} onPress={() => setRangePicker('end')} />
+                  <RangeChoice label="From" name={startName} number={startSurah} onPress={() => setRangePicker('startSurah')} />
+                  <AyahRangeChoice label="Starting Ayah" onPress={() => setRangePicker('startAyah')} value={startAyah} />
+                  <RangeChoice label="To" name={endName} number={endSurah} onPress={() => setRangePicker('endSurah')} />
+                  <AyahRangeChoice label="Ending Ayah" onPress={() => setRangePicker('endAyah')} value={endAyah} />
                 </SettingSection>
 
                 <SettingSection title="Repeat">
@@ -619,6 +704,21 @@ function RangeChoice({ label, name, number, onPress }: { label: string; name: st
       <View style={styles.choiceCopy}>
         <Text style={styles.choiceMeta}>{label.toUpperCase()}</Text>
         <Text style={styles.choiceLabel}>{name}</Text>
+      </View>
+      <Ionicons color={colors.gold} name="chevron-down" size={19} />
+    </Pressable>
+  );
+}
+
+function AyahRangeChoice({ label, value, onPress }: { label: string; value: number; onPress: () => void }) {
+  return (
+    <Pressable accessibilityLabel={`${label}, currently ${value}`} onPress={onPress} style={styles.rangeChoice}>
+      <View style={styles.rangeNumber}>
+        <Text style={styles.rangeNumberText}>{value}</Text>
+      </View>
+      <View style={styles.choiceCopy}>
+        <Text style={styles.choiceMeta}>{label.toUpperCase()}</Text>
+        <Text style={styles.choiceLabel}>Ayah {value}</Text>
       </View>
       <Ionicons color={colors.gold} name="chevron-down" size={19} />
     </Pressable>
