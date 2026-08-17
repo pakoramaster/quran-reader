@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View, type ViewToken } from 'react-native';
+import { ActivityIndicator, Animated, Easing, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View, type ViewToken } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FolioHeader, FolioScreen } from '@/components/FolioScreen';
@@ -31,6 +31,7 @@ const keys = {
   startAyah: 'recitation_start_ayah',
   endAyah: 'recitation_end_ayah',
   playhead: 'recitation_playhead_verse',
+  showTranslation: 'recitation_show_translation',
   rangeRepeat: 'recitation_range_repeat',
   ayahRepeat: 'recitation_ayah_repeat',
   volume: 'recitation_volume',
@@ -70,6 +71,7 @@ export default function RecitationScreen() {
   const [visibleSurahs, setVisibleSurahs] = useState<{ first: number; last: number } | null>(null);
   const [reciterOverride, setReciterOverride] = useState<ReciterId | null | undefined>();
   const [translationOverride, setTranslationOverride] = useState<string | null | undefined>();
+  const [showTranslationOverride, setShowTranslationOverride] = useState<boolean>();
   const [startOverride, setStartOverride] = useState<number>();
   const [endOverride, setEndOverride] = useState<number>();
   const [startAyahOverride, setStartAyahOverride] = useState<number>();
@@ -123,6 +125,7 @@ export default function RecitationScreen() {
       startAyah: await getSetting(userDb, keys.startAyah),
       endAyah: await getSetting(userDb, keys.endAyah),
       playhead: await getSetting(userDb, keys.playhead),
+      showTranslation: await getSetting(userDb, keys.showTranslation),
       rangeRepeat: await getSetting(userDb, keys.rangeRepeat),
       ayahRepeat: await getSetting(userDb, keys.ayahRepeat),
       volume: await getSetting(userDb, keys.volume),
@@ -145,6 +148,7 @@ export default function RecitationScreen() {
   const reciterId: ReciterId | null = reciterOverride !== undefined ? reciterOverride : isReciterId(storedReciter) ? storedReciter : null;
   const requestedTranslationId = translationOverride !== undefined ? translationOverride : (stored.data?.translation ?? null);
   const translation = translations.data?.find((item) => item.id === requestedTranslationId) ?? null;
+  const showTranslation = showTranslationOverride ?? stored.data?.showTranslation !== 'false';
   const startSurah = startOverride ?? bounded(stored.data?.start ?? null, 1, 1, 114);
   const endSurah = Math.max(startSurah, endOverride ?? bounded(stored.data?.end ?? null, startSurah, 1, 114));
   const startAyahCount = surahs.data?.[startSurah - 1]?.ayahCount ?? 286;
@@ -436,6 +440,7 @@ export default function RecitationScreen() {
               const playing = speech.status !== 'idle' && speech.currentVerseKey === item.key;
               const selected = !playing && resumeVerseKey === item.key;
               const showSurah = index === 0 || playbackRows[index - 1]?.surahNumber !== item.surahNumber;
+              const displayedTranslation = showTranslation ? item.translation : null;
               return (
                 <>
                   {showSurah ? (
@@ -464,10 +469,10 @@ export default function RecitationScreen() {
                     <Text selectable style={[styles.verseArabic, { fontSize: 28 * readingFontSize.scale, lineHeight: 48 * readingFontSize.scale }]}>
                       {item.arabic} <Text style={[styles.verseNumber, { fontSize: 20 * readingFontSize.scale }]}>﴿{item.ayahNumber}﴾</Text>
                     </Text>
-                    {item.translation ? <View style={styles.verseRule} /> : null}
-                    {item.translation ? (
+                    {displayedTranslation ? <View style={styles.verseRule} /> : null}
+                    {displayedTranslation ? (
                       <Text selectable style={[styles.verseTranslation, { fontSize: 18 * readingFontSize.scale, lineHeight: 25 * readingFontSize.scale }]}>
-                        {item.translation}
+                        {displayedTranslation}
                       </Text>
                     ) : null}
                   </Pressable>
@@ -608,6 +613,24 @@ export default function RecitationScreen() {
                     <Choice key={item.id} label={item.title} meta={`${item.language} · ${item.translator}`} onPress={() => selectTranslation(item.id)} selected={translation?.id === item.id} />
                   ))}
                   {!translations.isLoading && !translations.data?.length ? <Text style={styles.help}>Import a translation from the Library to make it available here.</Text> : null}
+                  <View style={[styles.toggleSetting, !translation ? styles.disabled : null]}>
+                    <View style={styles.toggleCopy}>
+                      <Text style={styles.toggleLabel}>Show translation text</Text>
+                      <Text style={styles.toggleHelp}>Hide the text to save screen space. Translation speech will still play.</Text>
+                    </View>
+                    <Switch
+                      accessibilityHint="Controls only the text shown in the playhead; translation speech remains enabled"
+                      accessibilityLabel="Show translation text"
+                      disabled={!translation}
+                      onValueChange={(value) => {
+                        setShowTranslationOverride(value);
+                        void setSetting(userDb, keys.showTranslation, String(value));
+                      }}
+                      thumbColor={colors.paperLight}
+                      trackColor={{ false: colors.border, true: colors.emerald }}
+                      value={showTranslation}
+                    />
+                  </View>
                 </SettingSection>
 
                 <SettingSection title="Volume">
@@ -908,6 +931,10 @@ const styles = StyleSheet.create({
   surahName: { color: colors.ink, flex: 1, fontFamily: fontFamilies.bodyBold, fontSize: 17 },
   surahArabic: { color: colors.emerald, fontFamily: fontFamilies.arabic, fontSize: 19 },
   help: { color: colors.inkMuted, fontFamily: fontFamilies.displayItalic, fontSize: 15, paddingVertical: 8 },
+  toggleSetting: { alignItems: 'center', borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 14, minHeight: 72, paddingHorizontal: 8, paddingVertical: 10 },
+  toggleCopy: { flex: 1 },
+  toggleLabel: { color: colors.ink, fontFamily: fontFamilies.bodyBold, fontSize: 16 },
+  toggleHelp: { color: colors.inkMuted, fontFamily: fontFamilies.body, fontSize: 13, lineHeight: 18, marginTop: 2 },
   stepper: { alignItems: 'center', borderTopColor: colors.border, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 12, minHeight: 64, paddingVertical: 8 },
   stepperCopy: { flex: 1 },
   stepperLabel: { color: colors.ink, fontFamily: fontFamilies.body, fontSize: 16 },
