@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View, type ViewToken } from 'react-native';
+import { ActivityIndicator, Animated, Easing, FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View, useWindowDimensions, type ViewToken } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FolioHeader, FolioScreen } from '@/components/FolioScreen';
@@ -60,7 +60,9 @@ export default function RecitationScreen() {
   const userDb = useUserDatabase();
   const speech = useSpeech();
   const readingFontSize = useReadingFontSize();
+  const { height: viewportHeight, width: viewportWidth } = useWindowDimensions();
   const verseListRef = useRef<FlatList<PlaybackRow>>(null);
+  const viewportSizeRef = useRef({ height: viewportHeight, width: viewportWidth });
   const volumeSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [rangePicker, setRangePicker] = useState<'startSurah' | 'endSurah' | 'startAyah' | 'endAyah' | null>(null);
@@ -207,11 +209,15 @@ export default function RecitationScreen() {
   }, [playbackRows, selectedIndex, speechEngineId, translation, voiceProfileId, voiceSpeed.value]);
   const versesLoading = rangeAyahs.isLoading || (Boolean(translation) && rangeTranslation.isLoading);
   const currentIndex = playbackRows.findIndex((verse) => verse.key === speech.currentVerseKey);
+  const scrollVerseToTop = useCallback((index: number, animated = true) => {
+    if (index < 0) return;
+    verseListRef.current?.scrollToIndex({ animated, index, viewPosition: 0 });
+  }, []);
   const toggleFollowingPlayback = () => {
     setFollowingPlayback((current) => {
       const next = !current;
       if (next && currentIndex >= 0) {
-        requestAnimationFrame(() => verseListRef.current?.scrollToIndex({ animated: true, index: currentIndex, viewPosition: 0.42 }));
+        requestAnimationFrame(() => scrollVerseToTop(currentIndex));
       }
       return next;
     });
@@ -235,8 +241,18 @@ export default function RecitationScreen() {
 
   useEffect(() => {
     if (!followingPlayback || currentIndex < 0 || speech.status === 'idle') return;
-    verseListRef.current?.scrollToIndex({ animated: true, index: currentIndex, viewPosition: 0.42 });
-  }, [currentIndex, followingPlayback, speech.status]);
+    scrollVerseToTop(currentIndex);
+  }, [currentIndex, followingPlayback, scrollVerseToTop, speech.status]);
+
+  useEffect(() => {
+    const previousSize = viewportSizeRef.current;
+    viewportSizeRef.current = { height: viewportHeight, width: viewportWidth };
+    const orientationChanged = previousSize.height !== viewportHeight && previousSize.width !== viewportWidth;
+    if (Platform.OS !== 'android' || !orientationChanged || !followingPlayback || currentIndex < 0 || speech.status === 'idle') return undefined;
+
+    const timeout = setTimeout(() => scrollVerseToTop(currentIndex, false), 100);
+    return () => clearTimeout(timeout);
+  }, [currentIndex, followingPlayback, scrollVerseToTop, speech.status, viewportHeight, viewportWidth]);
 
   const stopForChange = () => {
     if (speech.status !== 'idle') void speech.stop();
@@ -333,7 +349,7 @@ export default function RecitationScreen() {
     if (speech.status === 'idle') setOwnsPlayback(false);
     setSelectedVerseKey(verse.key);
     void setSetting(userDb, keys.playhead, verse.key);
-    verseListRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.42 });
+    scrollVerseToTop(index);
     if (speech.status !== 'idle') beginPlayback(index);
   };
 
@@ -433,7 +449,7 @@ export default function RecitationScreen() {
               </>
             }
             ListEmptyComponent={versesLoading ? <ActivityIndicator color={colors.gold} size="large" style={styles.listLoader} /> : null}
-            onScrollToIndexFailed={({ index }) => setTimeout(() => verseListRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.42 }), 250)}
+            onScrollToIndexFailed={({ index }) => setTimeout(() => scrollVerseToTop(index), 250)}
             onViewableItemsChanged={handleViewableItemsChanged}
             ref={verseListRef}
             renderItem={({ item, index }) => {
@@ -519,7 +535,7 @@ export default function RecitationScreen() {
               accessibilityLabel="Follow the currently playing Ayah"
               onPress={() => {
                 setFollowingPlayback(true);
-                verseListRef.current?.scrollToIndex({ animated: true, index: currentIndex, viewPosition: 0.42 });
+                scrollVerseToTop(currentIndex);
               }}
               style={styles.followButton}
             >
