@@ -1,4 +1,4 @@
-import { filterRecitationRange, resolveResumeVerseKey } from '@/features/recitation/domain/recitationRange';
+import { filterRecitationRange, findResumeSurahStartIndex, resolveResumeVerseKey } from '@/features/recitation/domain/recitationRange';
 import type { VerseKey } from '@/types/domain';
 
 const verse = (surahNumber: number, ayahNumber: number) => ({
@@ -34,5 +34,13 @@ describe('recitation range', () => {
 
   it('falls back to the first range verse for a stale playhead', () => {
     expect(resolveResumeVerseKey(verses, '3:1')).toBe('1:1');
+  });
+
+  it('finds the first range verse in the stored playhead Surah', () => {
+    expect(findResumeSurahStartIndex(verses, '2:2')).toBe(3);
+  });
+
+  it('does not choose a scroll position for a stale playhead', () => {
+    expect(findResumeSurahStartIndex(verses, '3:1')).toBe(-1);
   });
 });

@@ -9,7 +9,7 @@ import { FolioHeader, FolioScreen } from '@/components/FolioScreen';
 import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { listAyahsInRange, listSurahs } from '@/features/quran-reader/data/quranRepository';
 import { DEFAULT_RECITER_ID, getReciter, isReciterId, RECITERS, type ReciterId } from '@/features/recitation/domain/reciters';
-import { filterRecitationRange, resolveResumeVerseKey } from '@/features/recitation/domain/recitationRange';
+import { filterRecitationRange, findResumeSurahStartIndex, resolveResumeVerseKey } from '@/features/recitation/domain/recitationRange';
 import { CompactVolumeControl } from '@/features/recitation/ui/CompactVolumeControl';
 import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
 import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
@@ -31,6 +31,7 @@ const keys = {
   startAyah: 'recitation_start_ayah',
   endAyah: 'recitation_end_ayah',
   playhead: 'recitation_playhead_verse',
+  resumeSurahOnOpen: 'recitation_resume_surah_on_open',
   showTranslation: 'recitation_show_translation',
   rangeRepeat: 'recitation_range_repeat',
   ayahRepeat: 'recitation_ayah_repeat',
@@ -64,6 +65,7 @@ export default function RecitationScreen() {
   const verseListRef = useRef<FlatList<PlaybackRow>>(null);
   const viewportSizeRef = useRef({ height: viewportHeight, width: viewportWidth });
   const volumeSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialResumeScrollHandledRef = useRef(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [rangePicker, setRangePicker] = useState<'startSurah' | 'endSurah' | 'startAyah' | 'endAyah' | null>(null);
   const [selectedVerseKey, setSelectedVerseKey] = useState<VerseKey | null>(null);
@@ -127,6 +129,7 @@ export default function RecitationScreen() {
       startAyah: await getSetting(userDb, keys.startAyah),
       endAyah: await getSetting(userDb, keys.endAyah),
       playhead: await getSetting(userDb, keys.playhead),
+      resumeSurahOnOpen: await getSetting(userDb, keys.resumeSurahOnOpen),
       showTranslation: await getSetting(userDb, keys.showTranslation),
       rangeRepeat: await getSetting(userDb, keys.rangeRepeat),
       ayahRepeat: await getSetting(userDb, keys.ayahRepeat),
@@ -199,6 +202,7 @@ export default function RecitationScreen() {
     0,
     playbackRows.findIndex((verse) => verse.key === resumeVerseKey),
   );
+  const resumeSurahOnOpen = stored.data?.resumeSurahOnOpen !== 'false';
 
   useEffect(() => {
     if (!translation || speechEngineId !== 'kokoro') return undefined;
@@ -213,6 +217,16 @@ export default function RecitationScreen() {
     if (index < 0) return;
     verseListRef.current?.scrollToIndex({ animated, index, viewPosition: 0 });
   }, []);
+
+  useEffect(() => {
+    if (initialResumeScrollHandledRef.current || !stored.isSuccess || !playbackRows.length) return;
+    initialResumeScrollHandledRef.current = true;
+    if (!resumeSurahOnOpen) return;
+
+    const surahStartIndex = findResumeSurahStartIndex(playbackRows, stored.data.playhead);
+    if (surahStartIndex < 0) return;
+    requestAnimationFrame(() => scrollVerseToTop(surahStartIndex, false));
+  }, [playbackRows, resumeSurahOnOpen, scrollVerseToTop, stored.data?.playhead, stored.isSuccess]);
   const toggleFollowingPlayback = () => {
     setFollowingPlayback((current) => {
       const next = !current;
@@ -449,7 +463,10 @@ export default function RecitationScreen() {
               </>
             }
             ListEmptyComponent={versesLoading ? <ActivityIndicator color={colors.gold} size="large" style={styles.listLoader} /> : null}
-            onScrollToIndexFailed={({ index }) => setTimeout(() => scrollVerseToTop(index), 250)}
+            onScrollToIndexFailed={({ averageItemLength, index }) => {
+              verseListRef.current?.scrollToOffset({ animated: false, offset: averageItemLength * index });
+              setTimeout(() => scrollVerseToTop(index, false), 250);
+            }}
             onViewableItemsChanged={handleViewableItemsChanged}
             ref={verseListRef}
             renderItem={({ item, index }) => {
