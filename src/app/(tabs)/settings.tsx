@@ -242,11 +242,11 @@ export default function SettingsScreen() {
       <Section icon="headset-outline" title="Recitation">
         <View style={styles.toggleRow}>
           <View style={styles.optionCopy}>
-            <Text style={styles.optionTitle}>Open at last played Surah</Text>
-            <Text style={styles.optionMeta}>When the recitation tab opens, show the Surah containing your saved playhead at the top of the playlist.</Text>
+            <Text style={styles.optionTitle}>Open at last played Ayah</Text>
+            <Text style={styles.optionMeta}>When the recitation tab opens, show your saved playhead Ayah at the top of the playlist.</Text>
           </View>
           <Switch
-            accessibilityLabel="Open recitation at last played Surah"
+            accessibilityLabel="Open recitation at last played Ayah"
             accessibilityRole="switch"
             accessibilityState={{ checked: resumeSurahOnOpen, disabled: recitationResumeSurah.isLoading || save.isPending }}
             disabled={recitationResumeSurah.isLoading || save.isPending}
