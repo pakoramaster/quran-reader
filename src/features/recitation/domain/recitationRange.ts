@@ -33,9 +33,7 @@ export function resolveResumeVerseKey(verses: VersePosition[], storedKey: string
   return verses[0]?.key ?? null;
 }
 
-export function findResumeSurahStartIndex(verses: VersePosition[], storedKey: string | null): number {
+export function findResumeVerseIndex(verses: VersePosition[], storedKey: string | null): number {
   if (!storedKey) return -1;
-  const resumeVerse = verses.find((verse) => verse.key === storedKey);
-  if (!resumeVerse) return -1;
-  return verses.findIndex((verse) => verse.surahNumber === resumeVerse.surahNumber);
+  return verses.findIndex((verse) => verse.key === storedKey);
 }

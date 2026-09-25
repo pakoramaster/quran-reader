@@ -9,7 +9,7 @@ import { FolioHeader, FolioScreen } from '@/components/FolioScreen';
 import { useUserDatabase } from '@/data/databases/UserDatabaseProvider';
 import { listAyahsInRange, listSurahs } from '@/features/quran-reader/data/quranRepository';
 import { DEFAULT_RECITER_ID, getReciter, isReciterId, RECITERS, type ReciterId } from '@/features/recitation/domain/reciters';
-import { filterRecitationRange, findResumeSurahStartIndex, resolveResumeVerseKey } from '@/features/recitation/domain/recitationRange';
+import { filterRecitationRange, findResumeVerseIndex, resolveResumeVerseKey } from '@/features/recitation/domain/recitationRange';
 import { CompactVolumeControl } from '@/features/recitation/ui/CompactVolumeControl';
 import { getSetting, setSetting } from '@/features/settings/data/settingsRepository';
 import { useReadingFontSize } from '@/features/settings/application/useReadingFontSize';
@@ -223,9 +223,9 @@ export default function RecitationScreen() {
     initialResumeScrollHandledRef.current = true;
     if (!resumeSurahOnOpen) return;
 
-    const surahStartIndex = findResumeSurahStartIndex(playbackRows, stored.data.playhead);
-    if (surahStartIndex < 0) return;
-    requestAnimationFrame(() => scrollVerseToTop(surahStartIndex, false));
+    const resumeIndex = findResumeVerseIndex(playbackRows, stored.data.playhead);
+    if (resumeIndex < 0) return;
+    requestAnimationFrame(() => scrollVerseToTop(resumeIndex, false));
   }, [playbackRows, resumeSurahOnOpen, scrollVerseToTop, stored.data?.playhead, stored.isSuccess]);
   const toggleFollowingPlayback = () => {
     setFollowingPlayback((current) => {
