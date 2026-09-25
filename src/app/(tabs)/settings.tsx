@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { router } from 'expo-router';
 
@@ -63,6 +63,10 @@ export default function SettingsScreen() {
     queryKey: ['reading-font-size'],
     queryFn: () => getSetting(userDb, 'reading_font_size'),
   });
+  const recitationResumeSurah = useQuery({
+    queryKey: ['recitation-resume-surah-on-open'],
+    queryFn: () => getSetting(userDb, 'recitation_resume_surah_on_open'),
+  });
   const save = useMutation({
     mutationFn: ({ key, value }: { key: string; value: string }) => setSetting(userDb, key, value),
     onSuccess: async (_result, variables) => {
@@ -70,6 +74,13 @@ export default function SettingsScreen() {
         await queryClient.invalidateQueries({
           queryKey: ['reading-font-size'],
         });
+        return;
+      }
+      if (variables.key === 'recitation_resume_surah_on_open') {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['recitation-resume-surah-on-open'] }),
+          queryClient.invalidateQueries({ queryKey: ['recitation-player-settings'] }),
+        ]);
         return;
       }
       await Promise.all([
@@ -163,6 +174,7 @@ export default function SettingsScreen() {
   const selectedSpeed = getTtsSpeed(selectedSpeedId);
   const speechSettingsChanged = selectedEngineId !== storedEngineId || selectedProfileId !== storedProfileId || selectedSpeedId !== storedSpeedId || selectedSystemVoiceId !== storedSystemVoiceId;
   const selectedReadingFontSize = isReadingFontSizeId(readingFontSize.data) ? readingFontSize.data : DEFAULT_READING_FONT_SIZE_ID;
+  const resumeSurahOnOpen = recitationResumeSurah.data !== 'false';
   const stopForSpeechSettingsChange = () => {
     if (speech.status !== 'idle') void speech.stop();
   };
@@ -225,6 +237,25 @@ export default function SettingsScreen() {
             </Pressable>
           );
         })}
+      </Section>
+
+      <Section icon="headset-outline" title="Recitation">
+        <View style={styles.toggleRow}>
+          <View style={styles.optionCopy}>
+            <Text style={styles.optionTitle}>Open at last played Surah</Text>
+            <Text style={styles.optionMeta}>When the recitation tab opens, show the Surah containing your saved playhead at the top of the playlist.</Text>
+          </View>
+          <Switch
+            accessibilityLabel="Open recitation at last played Surah"
+            accessibilityRole="switch"
+            accessibilityState={{ checked: resumeSurahOnOpen, disabled: recitationResumeSurah.isLoading || save.isPending }}
+            disabled={recitationResumeSurah.isLoading || save.isPending}
+            onValueChange={(enabled) => save.mutate({ key: 'recitation_resume_surah_on_open', value: String(enabled) })}
+            thumbColor={colors.paperLight}
+            trackColor={{ false: colors.border, true: colors.emerald }}
+            value={resumeSurahOnOpen}
+          />
+        </View>
       </Section>
 
       <Section icon="volume-medium-outline" title="Read aloud">
@@ -452,6 +483,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   optionCopy: { flex: 1 },
+  toggleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 16,
+  },
   optionTitle: {
     color: colors.ink,
     fontFamily: fontFamilies.bodyBold,
